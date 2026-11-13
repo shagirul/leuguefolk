@@ -1,0 +1,11 @@
+node_modules/
+functions/node_modules/
+.firebase/
+.tmp/
+*-debug.log
+*.local
+.env
+.env.*
+!.env.example
+*.pem
+*.p12

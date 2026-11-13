@@ -1,0 +1,199 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function signedIn() { return request.auth != null; }
+    function groupPath(gid) { return /databases/$(database)/documents/groups/$(gid); }
+    function memberPath(gid,uid) { return /databases/$(database)/documents/groups/$(gid)/members/$(uid); }
+    function member(gid) { return signedIn() && exists(memberPath(gid,request.auth.uid)); }
+    function uuid(value) { return value is string && value.matches('^[a-fA-F0-9-]{36}$'); }
+    function code(value) { return value is string && value.matches('^[A-Z2-9]{8}$'); }
+    function named(value,min,max) { return value is string && value.size() >= min && value.size() <= max; }
+    function score(s) { return s is map && s.keys().hasOnly(['a','b']) && s.a is int && s.b is int && s.a >= 0 && s.a <= 200 && s.b >= 0 && s.b <= 200; }
+    function opponent(t,uid) { return uid == t.playerA ? t.playerB : t.playerA; }
+    function participant(t) { return signedIn() && request.auth.uid in [t.playerA,t.playerB]; }
+    function proposal(p,t) {
+      return p is map && p.keys().hasOnly(['score','by','note','at']) && score(p.score)
+        && p.by in [t.playerA,t.playerB] && named(p.note,0,280) && p.at is timestamp;
+    }
+    function cancellation(c,t) {
+      return c == null || (c is map && c.keys().hasOnly(['by','turn','note','at'])
+        && c.by in [t.playerA,t.playerB] && c.turn == opponent(t,c.by) && named(c.note,0,280) && c.at is timestamp);
+    }
+    function amendment(a,t) {
+      return a == null || (a is map && a.keys().hasOnly(['kind','score','by','turn','revision','note','at'])
+        && a.kind in ['score','void'] && (a.kind == 'void' ? a.score == null : score(a.score))
+        && a.by in [t.playerA,t.playerB] && a.turn == opponent(t,a.by)
+        && a.revision is int && a.revision >= 1 && a.revision <= 30 && named(a.note,0,280) && a.at is timestamp);
+    }
+    function ticketShape(t,gid) {
+      return t.keys().hasOnly(['groupId','playerA','playerB','createdBy','createdAt','playedAt','updatedAt','status','revision','version','turn','disputed','proposal','finalScore','finalizedAt','cancellation','amendment','action'])
+        && t.groupId == gid && named(t.playerA,1,128) && named(t.playerB,1,128) && t.playerA != t.playerB && t.createdBy == t.playerA
+        && t.createdAt is timestamp && t.playedAt == t.createdAt && t.updatedAt == request.time
+        && t.revision is int && t.revision >= 1 && t.revision <= 30 && t.version is int && t.version >= 1
+        && t.disputed is bool && proposal(t.proposal,t) && cancellation(t.cancellation,t) && amendment(t.amendment,t)
+        && t.action is map && t.action.keys().hasOnly(['id','kind','actor']) && uuid(t.action.id) && t.action.actor == request.auth.uid
+        && ((t.status == 'open' && t.turn == opponent(t,t.proposal.by) && t.finalScore == null && t.finalizedAt == null && t.amendment == null)
+          || (t.status == 'finalized' && t.turn == null && score(t.finalScore) && t.finalizedAt is timestamp && t.cancellation == null)
+          || (t.status == 'cancelled' && t.turn == null && t.finalScore == null && t.cancellation == null && t.amendment == null));
+    }
+    // Four records commit together. Immutable operation IDs make retries idempotent.
+    function actionBundle(t,gid,tid) {
+      let aid = t.action.id;
+      let opPath = /databases/$(database)/documents/groups/$(gid)/operations/$(aid);
+      let op = getAfter(opPath).data;
+      let event = getAfter(/databases/$(database)/documents/groups/$(gid)/tickets/$(tid)/events/$(aid)).data;
+      let target = opponent(t,request.auth.uid);
+      let notice = getAfter(/databases/$(database)/documents/users/$(target)/notifications/$(aid)).data;
+      return !exists(opPath) && op.actor == request.auth.uid && op.ticketId == tid && op.kind == t.action.kind && op.version == t.version && op.createdAt == request.time
+        && event.actor == request.auth.uid && event.kind == t.action.kind && event.at == request.time
+        && notice.groupId == gid && notice.ticketId == tid && notice.kind == t.action.kind && notice.createdAt == request.time;
+    }
+    function changed(fields) { return request.resource.data.diff(resource.data).affectedKeys().hasOnly(fields.concat(['updatedAt','version','action'])); }
+    function open(t) { return t.status == 'open' && t.cancellation == null; }
+    function transition(t,n) {
+      let actor = request.auth.uid;
+      let kind = n.action.kind;
+      return (kind == 'confirm' && open(t) && t.turn == actor
+          && changed(['status','finalScore','finalizedAt','turn','cancellation','amendment'])
+          && n.status == 'finalized' && n.finalScore == t.proposal.score && n.finalizedAt == request.time)
+        || (kind == 'propose' && open(t) && t.turn == actor && t.revision < 30
+          && changed(['revision','proposal','turn','disputed']) && n.revision == t.revision + 1
+          && n.proposal.by == actor && n.proposal.at == request.time && n.turn == opponent(t,actor) && (!t.disputed || n.disputed))
+        || (kind == 'editOriginal' && open(t) && t.playerA == actor && t.revision == 1 && t.proposal.by == actor
+          && changed(['revision','proposal']) && n.revision == 2 && n.proposal.by == actor && n.proposal.at == request.time)
+        || (kind == 'withdrawOriginal' && open(t) && t.playerA == actor && t.revision == 1 && t.proposal.by == actor
+          && changed(['status','turn','cancellation']) && n.status == 'cancelled')
+        || (kind == 'requestCancel' && open(t) && changed(['cancellation']) && n.cancellation != null
+          && n.cancellation.by == actor && n.cancellation.turn == opponent(t,actor) && n.cancellation.at == request.time)
+        || (kind == 'respondCancel' && t.status == 'open' && t.cancellation != null && t.cancellation.turn == actor
+          && changed(['status','turn','cancellation']) && n.cancellation == null
+          && ((n.status == 'open' && n.turn == t.turn) || n.status == 'cancelled'))
+        || (kind == 'startAmendment' && t.status == 'finalized' && t.amendment == null && changed(['amendment'])
+          && n.amendment != null && n.amendment.by == actor && n.amendment.turn == opponent(t,actor) && n.amendment.revision == 1 && n.amendment.at == request.time)
+        || (kind == 'counterAmendment' && t.status == 'finalized' && t.amendment != null && t.amendment.kind == 'score'
+          && t.amendment.turn == actor && t.amendment.revision < 30 && changed(['amendment'])
+          && n.amendment != null && n.amendment.kind == 'score' && n.amendment.by == actor && n.amendment.turn == opponent(t,actor)
+          && n.amendment.revision == t.amendment.revision + 1 && n.amendment.at == request.time)
+        || (kind == 'respondAmendment' && t.status == 'finalized' && t.amendment != null && t.amendment.turn == actor
+          && changed(['amendment','status','finalScore']) && n.amendment == null
+          && ((n.status == 'finalized' && n.finalScore == t.finalScore)
+            || (t.amendment.kind == 'score' && n.status == 'finalized' && n.finalScore == t.amendment.score)
+            || (t.amendment.kind == 'void' && n.status == 'cancelled' && n.finalScore == null)));
+    }
+    function actionTicket(gid,tid,aid) {
+      let t = getAfter(/databases/$(database)/documents/groups/$(gid)/tickets/$(tid)).data;
+      return member(gid) && participant(t) && t.action.id == aid && t.action.actor == request.auth.uid && t.updatedAt == request.time;
+    }
+    function eventScore(t) {
+      return t.action.kind in ['submitted','propose','editOriginal'] ? t.proposal.score
+        : (t.action.kind == 'confirm' ? t.finalScore
+          : (t.action.kind in ['startAmendment','counterAmendment'] ? t.amendment.score : null));
+    }
+    match /users/{uid} {
+      allow read: if signedIn() && request.auth.uid == uid;
+      function validProfile() { return named(request.resource.data.displayName,2,32) && request.resource.data.updatedAt == request.time; }
+      allow create: if signedIn() && request.auth.uid == uid && validProfile()
+        && request.resource.data.keys().hasOnly(['displayName','createdAt','updatedAt']) && request.resource.data.createdAt == request.time;
+      allow update: if signedIn() && request.auth.uid == uid && validProfile()
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['displayName','updatedAt']);
+      allow delete: if false;
+      match /memberships/{gid} {
+        allow read: if signedIn() && request.auth.uid == uid;
+        allow create: if signedIn() && request.auth.uid == uid && uuid(gid)
+          && request.resource.data.keys().hasOnly(['groupId','name','joinedAt']) && request.resource.data.groupId == gid
+          && request.resource.data.name == getAfter(groupPath(gid)).data.name
+          && request.resource.data.joinedAt == getAfter(memberPath(gid,uid)).data.joinedAt;
+        allow update, delete: if false;
+      }
+      match /devices/{did} { allow read: if signedIn() && request.auth.uid == uid; allow write: if false; }
+      match /notifications/{nid} {
+        allow read: if signedIn() && request.auth.uid == uid;
+        function validNotification() {
+          let n = request.resource.data;
+          let t = getAfter(/databases/$(database)/documents/groups/$(n.groupId)/tickets/$(n.ticketId)).data;
+          return uuid(nid) && n.keys().hasOnly(['kind','title','body','groupId','ticketId','path','createdAt','readAt'])
+            && actionTicket(n.groupId,n.ticketId,nid) && uid == opponent(t,request.auth.uid) && n.kind == t.action.kind
+            && n.path == '/g/' + n.groupId + '/t/' + n.ticketId && n.createdAt == request.time && n.readAt == null
+            && n.title == (n.kind == 'submitted' ? 'New match to confirm' : 'Match updated')
+            && n.body == (n.kind == 'submitted' ? 'A player submitted a score.' : 'Open your match to review.');
+        }
+        allow create: if signedIn() && validNotification();
+        allow update: if signedIn() && request.auth.uid == uid
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['readAt']) && request.resource.data.readAt == request.time;
+        allow delete: if false;
+      }
+    }
+    match /groups/{gid} {
+      allow read: if member(gid);
+      allow get: if signedIn() && !exists(groupPath(gid));
+      function groupBundle() {
+        let g = request.resource.data;
+        let invite = getAfter(/databases/$(database)/documents/inviteCodes/$(g.inviteCode)).data;
+        let m = getAfter(memberPath(gid,request.auth.uid)).data;
+        let own = getAfter(/databases/$(database)/documents/users/$(request.auth.uid)/memberships/$(gid)).data;
+        return uuid(gid) && g.keys().hasOnly(['name','creatorUid','inviteCode','createdAt','timeZone'])
+          && named(g.name,2,52) && g.creatorUid == request.auth.uid && code(g.inviteCode) && g.createdAt == request.time && g.timeZone == 'Asia/Kolkata'
+          && invite.groupId == gid && invite.name == g.name && invite.createdAt == request.time
+          && m.inviteCode == g.inviteCode && m.joinedAt == request.time && own.groupId == gid && own.name == g.name;
+      }
+      allow create: if signedIn() && groupBundle();
+      allow update, delete: if false;
+      match /members/{uid} {
+        allow read: if member(gid);
+        allow get: if signedIn() && request.auth.uid == uid;
+        allow create: if signedIn() && request.auth.uid == uid && uuid(gid)
+          && request.resource.data.keys().hasOnly(['displayName','joinedAt','inviteCode']) && request.resource.data.joinedAt == request.time
+          && request.resource.data.displayName == get(/databases/$(database)/documents/users/$(uid)).data.displayName
+          && code(request.resource.data.inviteCode)
+          && getAfter(/databases/$(database)/documents/inviteCodes/$(request.resource.data.inviteCode)).data.groupId == gid
+          && getAfter(/databases/$(database)/documents/users/$(uid)/memberships/$(gid)).data.joinedAt == request.time;
+        allow update, delete: if false;
+      }
+      match /tickets/{tid} {
+        allow read: if member(gid);
+        allow create: if member(gid) && uuid(tid) && ticketShape(request.resource.data,gid)
+          && request.resource.data.playerA == request.auth.uid && exists(memberPath(gid,request.resource.data.playerB))
+          && request.resource.data.createdAt == request.time && request.resource.data.status == 'open'
+          && request.resource.data.revision == 1 && request.resource.data.version == 1 && request.resource.data.disputed == false
+          && request.resource.data.proposal.by == request.auth.uid && request.resource.data.proposal.at == request.time
+          && request.resource.data.cancellation == null && request.resource.data.action.id == tid && request.resource.data.action.kind == 'submitted'
+          && actionBundle(request.resource.data,gid,tid);
+        allow update: if member(gid) && participant(resource.data) && ticketShape(request.resource.data,gid)
+          && request.resource.data.version == resource.data.version + 1 && transition(resource.data,request.resource.data)
+          && actionBundle(request.resource.data,gid,tid);
+        allow delete: if false;
+        match /events/{eid} {
+          allow read: if member(gid);
+          allow create: if signedIn() && actionTicket(gid,tid,eid)
+            && request.resource.data.keys().hasOnly(['kind','actor','at','note','score'])
+            && request.resource.data.actor == request.auth.uid && request.resource.data.at == request.time
+            && request.resource.data.kind == getAfter(/databases/$(database)/documents/groups/$(gid)/tickets/$(tid)).data.action.kind
+            && named(request.resource.data.note,0,280)
+            && request.resource.data.get('score',null) == eventScore(getAfter(/databases/$(database)/documents/groups/$(gid)/tickets/$(tid)).data);
+          allow update, delete: if false;
+        }
+      }
+      match /operations/{aid} {
+        allow get: if member(gid) && (!exists(/databases/$(database)/documents/groups/$(gid)/operations/$(aid)) || resource.data.actor == request.auth.uid);
+        allow list: if false;
+        allow create: if signedIn() && uuid(aid) && request.resource.data.keys().hasOnly(['actor','ticketId','kind','version','createdAt'])
+          && actionTicket(gid,request.resource.data.ticketId,aid) && request.resource.data.actor == request.auth.uid
+          && request.resource.data.createdAt == request.time
+          && request.resource.data.version == getAfter(/databases/$(database)/documents/groups/$(gid)/tickets/$(request.resource.data.ticketId)).data.version
+          && request.resource.data.kind == getAfter(/databases/$(database)/documents/groups/$(gid)/tickets/$(request.resource.data.ticketId)).data.action.kind;
+        allow update, delete: if false;
+      }
+    }
+    match /inviteCodes/{inviteCode} {
+      // A code is a capability: authenticated exact lookups are allowed; enumeration is denied.
+      allow get: if signedIn();
+      allow list: if false;
+      allow create: if signedIn() && code(inviteCode)
+        && request.resource.data.keys().hasOnly(['groupId','name','createdAt']) && request.resource.data.createdAt == request.time
+        && getAfter(groupPath(request.resource.data.groupId)).data.creatorUid == request.auth.uid
+        && getAfter(groupPath(request.resource.data.groupId)).data.inviteCode == inviteCode
+        && getAfter(groupPath(request.resource.data.groupId)).data.name == request.resource.data.name;
+      allow update, delete: if false;
+    }
+  }
+}
