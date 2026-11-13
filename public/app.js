@@ -25,8 +25,25 @@ function navigate(path){history.pushState({},'',path);state.route=parsePath();st
 function go(view){navigate(`/g/${state.groupId}/${view}`);}
 function badge(text,tone='purple'){return `<span class="badge ${tone}">${esc(text)}</span>`;}
 function xp(score){return Number(score||0)*2;}
-function toast(text,path=null){const t=document.getElementById('toast');t.textContent=path?text+' · Tap to open':text;t.onclick=path&&/^\/g\/[a-f\d-]{36}\//i.test(path)?()=>navigate(path):null;t.style.cursor=t.onclick?'pointer':'default';t.classList.add('show');clearTimeout(toastTimeout);toastTimeout=setTimeout(()=>t.classList.remove('show'),5000);}
+function toast(text,path=null,duration=5000){const t=document.getElementById('toast');t.textContent=path?text+' · Tap to open':text;t.onclick=path&&/^\/g\/[a-f\d-]{36}\//i.test(path)?()=>navigate(path):null;t.style.cursor=t.onclick?'pointer':'default';t.classList.add('show');clearTimeout(toastTimeout);toastTimeout=setTimeout(()=>t.classList.remove('show'),duration);}
 function errText(e){const v=String(e?.message||e||'Unexpected error').replace(/^Firebase:\s*/, '').replace(/\s*\(functions\/[\w-]+\)\.?/g,'').replace(/\s*\(auth\/[\w-]+\)\.?/g,'');return v.slice(0,240);}
+function authErrorText(error){
+  const messages={
+    'auth/invalid-credential':'Email or password is incorrect. New here? Choose Create account. Joined with Google? Use Continue with Google.',
+    'auth/user-not-found':'No account was found for this email. Choose Create account to register.',
+    'auth/wrong-password':'Incorrect password. Please try again.',
+    'auth/invalid-email':'Enter a valid email address.',
+    'auth/email-already-in-use':'An account already uses this email. Sign in instead, or use Continue with Google if that is how you joined.',
+    'auth/weak-password':'Choose a stronger password with at least 6 characters.',
+    'auth/password-does-not-meet-requirements':'This password does not meet the account password requirements. Choose a stronger password.',
+    'auth/operation-not-allowed':'Email/password sign-in is unavailable. Try Continue with Google.',
+    'auth/too-many-requests':'Too many sign-in attempts. Wait a while before trying again.',
+    'auth/network-request-failed':'Could not reach the sign-in service. Check your internet connection and try again.',
+    'auth/user-disabled':'This account has been disabled. Contact the app owner.'
+  };
+  return messages[error?.code]||`${errText(error)}${error?.code?' ('+error.code+')':''}`;
+}
+function showAuthError(message){if(message)toast(message,null,8000);else{document.getElementById('toast').classList.remove('show');clearTimeout(toastTimeout);}}
 function note(tone,body){return `<div class="notice ${tone}">${body}</div>`;}
 function icon(s){return `<span aria-hidden="true">${s}</span>`;}
 function button(label,action,kind='',attrs=''){return `<button type="button" class="btn ${kind}" data-action="${esc(action)}" ${attrs}>${label}</button>`;}
@@ -122,7 +139,6 @@ function inboxContent(){const all=state.notifications;
 function profileContent(){const g=state.group;
   return `<div class="card"><div class="row"><div class="avatar" style="width:55px;height:55px;font-size:23px">${esc((state.profile?.displayName||'A').charAt(0))}</div><div><div class="member-name">${esc(state.profile?.displayName||'Player')}</div><div class="quiet small">${esc(state.user?.email||'')}</div></div></div></div>
     <div class="section-heading"><h2>Invite your friends</h2></div><div class="soft-card"><div class="small quiet" style="margin-bottom:10px">Anyone with this code can join your group. There is no admin.</div><div class="copy-code"><span>${esc(g?.inviteCode||'')}</span><button class="link-btn" data-action="copyInvite">Copy</button></div><div class="spacer"></div>${button('Share invitation','shareInvite','secondary')}</div>
-    <div class="section-heading"><h2>Notifications & offline</h2></div><div class="card"><div class="row between"><div class="grow"><div class="member-name">Push notifications</div><div class="small quiet" style="margin-top:5px">Turned off · Match requests appear in your inbox</div></div><span class="quiet small">Off</span></div><hr class="divider"><div class="row between"><div class="grow"><div class="member-name">Offline outbox</div><div class="small quiet" style="margin-top:4px">${state.queue.length} local actions</div></div><button class="link-btn" data-action="outbox">View</button></div></div>
     <div class="section-heading"><h2>Your groups</h2></div><div class="card"><div class="row between"><div><div class="member-name">${esc(g?.name||'')}</div><div class="small quiet">${state.members.length} members · Asia/Kolkata seasons</div></div>${badge('Joined','green')}</div></div>
     ${button('Switch / create another group','groupSwitch','secondary')}${button('Sign out','logout','ghost')}
     <p class="footer-info">No central admin. Both players must agree on the score or a cancellation. Verified results cannot be changed by one person alone.</p>`;
@@ -173,7 +189,7 @@ function authScreen(){const create=state.authMode==='signup',disabled=state.auth
 async function signInWithGoogle(){
   if(state.authBusy)return;
   if(!state.online){toast('Connect to the internet to sign in with Google.');return;}
-  state.authBusy=true;render();
+  showAuthError('');state.authBusy=true;render();
   try{
     const provider=new GoogleAuthProvider();provider.setCustomParameters({prompt:'select_account'});
     await signInWithPopup(auth,provider);
@@ -185,7 +201,7 @@ async function signInWithGoogle(){
       'auth/unauthorized-domain':'Google sign-in is not available on this website yet. Please sign in with email and password.',
       'auth/account-exists-with-different-credential':'An account already exists with this email. Sign in with your email and password.'
     };
-    toast(messages[e.code]||errText(e));
+    showAuthError(messages[e.code]||authErrorText(e));
   }finally{state.authBusy=false;render();}
 }
 function profileSetup(){return `<div class="auth-wrap"><div class="auth-card"><div class="logo-mark">A</div><h1>Choose your name</h1><p>This is how friends will recognize you on their leaderboard.</p><form id="profileForm"><div class="field"><label>Display name</label><input class="input" name="displayName" minlength="2" maxlength="32" required placeholder="Your name" value="${esc(state.user?.displayName||'')}"/></div><button class="btn" type="submit">Continue</button></form>${button('Sign out','logout','ghost')}</div></div>`;}
@@ -374,7 +390,7 @@ document.addEventListener('click',async e=>{
     else if(action==='flushNow')flushOutbox();
     else if(action==='enablePush')openDialog('enablePush');
     else if(action==='commitPush')await enablePush();
-    else if(action==='switchAuth'){state.authMode=state.authMode==='login'?'signup':'login';render();}
+    else if(action==='switchAuth'){state.authMode=state.authMode==='login'?'signup':'login';showAuthError('');render();}
     else if(action==='logout'){
       if(pushEnabled&&!state.online){toast('Reconnect before signing out so notifications can be disabled safely.');return;}
       const did=localStorage.getItem('agree-device-id');
@@ -391,6 +407,7 @@ document.addEventListener('submit',async e=>{
   if(form.id==='authForm'&&state.authBusy)return;
   const submit=form.querySelector('[type=submit]');if(submit?.disabled)return;if(submit)submit.disabled=true;
   const d=Object.fromEntries(new FormData(form));
+  if(form.id==='authForm')showAuthError('');
   try{
     if(form.id==='authForm'){
       if(state.authMode==='signup'){
@@ -436,7 +453,7 @@ document.addEventListener('submit',async e=>{
       if(state.dialog.kind==='voidMatch')await act('startAmendment',t,{amendmentKind:'void',note:d.note});
       else await act('requestCancel',t,{note:d.note});
     }
-  }catch(error){console.error(error);toast(errText(error));}
+  }catch(error){if(form.id==='authForm'&&!state.user)showAuthError(authErrorText(error));else{console.error(error);toast(errText(error));}}
   finally{if(submit?.isConnected)submit.disabled=false;}
 });
 start();

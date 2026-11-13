@@ -4,7 +4,7 @@ const fs=require('node:fs');
 const vm=require('node:vm');
 
 // Exercise the app's real event handlers and auth observer with SDK/DOM boundaries mocked.
-async function fixture(){
+async function fixture({loginError,signupError}={}){
   const events={},profiles=new Map(),writes=[],popups=[];
   const root={innerHTML:''},toast={classList:{add(){},remove(){}},textContent:'',style:{}};
   const auth={currentUser:null};let observer,popup=async()=>({user:auth.currentUser});
@@ -26,8 +26,8 @@ async function fixture(){
     setDoc:async(path,data)=>{writes.push({path,data});profiles.set(path,{...profiles.get(path),...data});},
     serverTimestamp:()=>({serverTimestamp:true}),
     getFunctions:()=>{throw Error('Spark auth must not initialize Cloud Functions');},
-    createUserWithEmailAndPassword:async(_,email)=>{auth.currentUser={uid:'email-user',email};await observer(auth.currentUser);return {user:auth.currentUser};},
-    signInWithEmailAndPassword:async(_,email)=>{auth.currentUser={uid:'email-user',email};await observer(auth.currentUser);},
+    createUserWithEmailAndPassword:async(_,email)=>{if(signupError)throw signupError;auth.currentUser={uid:'email-user',email};await observer(auth.currentUser);return {user:auth.currentUser};},
+    signInWithEmailAndPassword:async(_,email)=>{if(loginError)throw loginError;auth.currentUser={uid:'email-user',email};await observer(auth.currentUser);},
     updateProfile:async(user,data)=>Object.assign(user,data)
   });
   const source=fs.readFileSync(require.resolve('../public/app.js'),'utf8').split('\n').filter(l=>!l.startsWith('import ')).join('\n');
@@ -83,6 +83,29 @@ test('email signup and subsequent email login still save and load the profile on
   await f.changeUser(null);await f.click('switchAuth');
   await f.submit({email:'player@example.test',password:'test-password'});
   assert.match(f.root.innerHTML,/Welcome, Email Player/);assert.equal(f.popups.length,0);
+});
+test('failed login shows actionable toasts without clearing the form or exposing account existence for combined errors',async()=>{
+  for(const [code,expected] of [
+    ['auth/invalid-credential',/Email or password is incorrect.*Create account.*Google/],
+    ['auth/user-not-found',/No account was found.*Create account/],
+    ['auth/wrong-password',/Incorrect password/],
+    ['auth/network-request-failed',/internet connection/],
+    ['auth/too-many-requests',/Too many sign-in attempts/]
+  ]){
+    const f=await fixture({loginError:{code,message:`Firebase: Error (${code}).`}}),before=f.root.innerHTML;
+    await f.submit({email:'player@example.test',password:'test-password'});
+    assert.match(f.toast.textContent,expected);assert.equal(f.root.innerHTML,before);assert.equal(f.auth.currentUser,null);
+    await f.click('switchAuth');await f.click('switchAuth');
+    assert.doesNotMatch(f.root.innerHTML,/disabled/);
+  }
+});
+test('duplicate signup explains how to sign in and unknown auth errors retain their diagnostic code',async()=>{
+  const f=await fixture({signupError:{code:'auth/email-already-in-use'}});await f.click('switchAuth');
+  await f.submit({email:'player@example.test',password:'test-password',displayName:'Player'});
+  assert.match(f.toast.textContent,/already uses this email.*Sign in instead/);
+  const unknown=await fixture({loginError:{code:'auth/internal-error',message:'Firebase: Error (auth/internal-error).'}});
+  await unknown.submit({email:'player@example.test',password:'test-password'});
+  assert.match(unknown.toast.textContent,/auth\/internal-error/);
 });
 test('leaderboards count only verified scores in the server creation-date season',async()=>{
   const f=await fixture(),now=new Date(),old=new Date(now.getTime()-40*86400000);
