@@ -14,8 +14,9 @@ test('direct Firestore group and match workflow is authorized by deployed-style 
     const auth=getAuth(app);connectAuthEmulator(auth,`http://${process.env.FIREBASE_AUTH_EMULATOR_HOST}`,{disableWarnings:true});
     const store=sdk.getFirestore(app),[host,port]=process.env.FIRESTORE_EMULATOR_HOST.split(':');sdk.connectFirestoreEmulator(store,host,+port);
     const {user}=await createUserWithEmailAndPassword(auth,`${randomUUID()}@example.test`,'emulator-only-password');
-    await setDoc(doc(store,'users',user.uid),{displayName:name,createdAt:serverTimestamp(),updatedAt:serverTimestamp()});
-    return {store,user,call:createFirestoreApi(store,auth,sdk)};
+    const call=createFirestoreApi(store,auth,sdk);
+    await call('saveProfile',{displayName:name+'_'+randomUUID().slice(0,6)});
+    return {store,user,call};
   }
   const denied=p=>assert.rejects(p,e=>e.code==='permission-denied');
   try{

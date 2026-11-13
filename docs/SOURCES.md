@@ -11,5 +11,6 @@
 - Apple Web Push and iOS install requirement: https://developer.apple.com/documentation/usernotifications/sending-web-push-notifications-in-web-apps-and-browsers
 - Firebase JavaScript SDK release notes: https://firebase.google.com/support/release-notes/js
 - Firebase Google sign-in (popup and provider configuration): https://firebase.google.com/docs/auth/web/google-signin
+- Firebase password-reset emails and hosted action handler: https://firebase.google.com/docs/auth/web/manage-users#send_a_password_reset_email
 - Firebase Cloud Functions runtime: https://firebase.google.com/docs/functions/manage-functions
 - Firestore atomic-write authorization with getAfter(): https://firebase.google.com/docs/firestore/security/rules-conditions

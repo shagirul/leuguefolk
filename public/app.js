@@ -1,6 +1,6 @@
 import {initializeApp} from 'https://www.gstatic.com/firebasejs/12.19.0/firebase-app.js';
-import {getAuth,GoogleAuthProvider,signInWithPopup,createUserWithEmailAndPassword,signInWithEmailAndPassword,signOut,onAuthStateChanged,updateProfile} from 'https://www.gstatic.com/firebasejs/12.19.0/firebase-auth.js';
-import {getFirestore,doc,collection,onSnapshot,getDoc,setDoc,updateDoc,runTransaction,serverTimestamp,query,orderBy,limit,initializeFirestore,persistentLocalCache,persistentMultipleTabManager} from 'https://www.gstatic.com/firebasejs/12.19.0/firebase-firestore.js';
+import {getAuth,GoogleAuthProvider,signInWithPopup,createUserWithEmailAndPassword,signInWithEmailAndPassword,sendPasswordResetEmail,signOut,onAuthStateChanged,updateProfile} from 'https://www.gstatic.com/firebasejs/12.19.0/firebase-auth.js';
+import {getFirestore,doc,collection,onSnapshot,getDoc,getDocs,updateDoc,runTransaction,serverTimestamp,query,orderBy,limit,initializeFirestore,persistentLocalCache,persistentMultipleTabManager} from 'https://www.gstatic.com/firebasejs/12.19.0/firebase-firestore.js';
 import {createFirestoreApi} from '/firestore-api.mjs';
 import {getMessaging,getToken,deleteToken,onMessage,isSupported} from 'https://www.gstatic.com/firebasejs/12.19.0/firebase-messaging.js';
 import {enqueue,forUser,patchAction,deleteAction} from '/queue.js';
@@ -12,7 +12,7 @@ const ready=!!settings.firebaseConfig?.apiKey&&!settings.firebaseConfig.apiKey.s
 const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const short=s=>String(s??'').slice(0,100);
 const uid=()=>crypto.randomUUID();
-const state={user:null,profile:null,memberships:[],groupId:null,group:null,members:[],tickets:[],notifications:[],ticketEvents:[],queue:[],online:navigator.onLine,route:parsePath(),period:'weekly',matchTab:'all',dialog:null,draft:{},authMode:'login',authBusy:false,notice:null,loadError:'',authLoading:true,groupLoading:false,initialized:false};
+const state={user:null,profile:null,memberships:[],groupId:null,group:null,members:[],tickets:[],notifications:[],ticketEvents:[],queue:[],online:navigator.onLine,route:parsePath(),period:'weekly',matchTab:'all',dialog:null,draft:{},authMode:'welcome',authEmail:'',authBusy:false,notice:null,loadError:'',authLoading:true,groupLoading:false,initialized:false};
 const unsub={};let firebaseApp,auth,store,firestoreApi,messaging=null,swReg=null,flushBusy=false,toastTimeout,lastPushSync=0;
 function when(value){return value?.toDate?value.toDate():(value?new Date(value):null);}
 function dateShort(value){const d=when(value);return d&&!Number.isNaN(+d)?d.toLocaleString('en-IN',{day:'numeric',month:'short',hour:'numeric',minute:'2-digit'}):'Just now';}
@@ -169,7 +169,7 @@ function render(){
   if(!ready){root.innerHTML=`<div class="auth-wrap"><div class="auth-card"><div class="logo-mark">A</div><h1>Connect your Firebase app</h1><p>This PWA is intentionally not connected to anyone else's project.</p>${note('warn','Edit <strong>public/firebase-config.js</strong> and add your web app config and public VAPID key. Follow README.md to enable Firebase services and deploy.')}</div></div>`;return;}
   if(state.authLoading){root.innerHTML=`<div class="loading"><div class="logo-mark">A</div><h1>Agree</h1><p>Loading your account…</p></div>`;return;}
   if(!state.user){root.innerHTML=authScreen();return;}
-  if(!state.profile?.displayName){root.innerHTML=profileSetup();return;}
+  if(!state.profile?.username){root.innerHTML=profileSetup();return;}
   if(!backendEnabled){root.innerHTML=accountScreen();return;}
   if(!state.groupId||!myGroup()){root.innerHTML=groupsScreen();return;}
   if(!state.group){root.innerHTML=`<div class="loading"><div class="logo-mark">A</div><h1>Loading group…</h1><p>${esc(state.loadError||'Getting the latest matches')}</p></div>`;return;}
@@ -185,11 +185,24 @@ function render(){
   else {content=rankContent();active='leaderboard';}
   root.innerHTML=shell(title,content,active,back);
 }
-function authScreen(){const create=state.authMode==='signup',disabled=state.authBusy?'disabled':'';return `<div class="auth-wrap"><div class="auth-card"><div class="logo-mark">A</div><h1>${create?'Create account':'Welcome to Agree'}</h1><p>${backendEnabled?'Private leaderboards. Your score counts only when both players accept it.':'Sign in to manage your Agree profile. Group leaderboards and matches are currently unavailable.'}</p>${button(state.authBusy?'Connecting to Google…':'Continue with Google','googleSignIn','outline',disabled)}<p class="text-center small quiet">or ${create?'create an account':'sign in'} with email</p><form id="authForm">${create?`<div class="field"><label>Display name</label><input class="input" name="displayName" minlength="2" maxlength="32" required placeholder="Alex" autocomplete="nickname"/></div>`:''}<div class="field"><label>Email</label><input class="input" type="email" name="email" required autocomplete="email" placeholder="you@example.com"/></div><div class="field"><label>Password</label><input class="input" type="password" name="password" minlength="6" required autocomplete="${create?'new-password':'current-password'}" placeholder="At least 6 characters"/></div><button class="btn" type="submit" ${disabled}>${create?'Create account':'Sign in'}</button></form><div style="margin-top:17px;text-align:center"><button class="link-btn" data-action="switchAuth" ${disabled}>${create?'Already have an account? Sign in':'New here? Create account'}</button></div></div></div>`;}
+function authScreen(){
+  const mode=state.authMode,create=mode==='signup',reset=mode==='reset',sent=mode==='resetSent',welcome=mode==='welcome',disabled=state.authBusy?'disabled':'';
+  const google=`<button type="button" class="btn auth-google" data-action="googleSignIn" ${disabled}><svg width="20" height="20" viewBox="0 0 24 24" aria-hidden="true"><path fill="#4285F4" d="M21.6 12.23c0-.71-.06-1.39-.18-2.05H12v3.88h5.38a4.6 4.6 0 0 1-2 3.02v2.51h3.24c1.9-1.75 2.98-4.33 2.98-7.36Z"/><path fill="#34A853" d="M12 22c2.7 0 4.96-.9 6.62-2.41l-3.24-2.51c-.9.6-2.04.96-3.38.96-2.6 0-4.8-1.76-5.59-4.12H3.07v2.59A10 10 0 0 0 12 22Z"/><path fill="#FBBC05" d="M6.41 13.92a6 6 0 0 1 0-3.84V7.49H3.07a10 10 0 0 0 0 9.02l3.34-2.59Z"/><path fill="#EA4335" d="M12 5.96c1.47 0 2.79.51 3.82 1.51l2.87-2.87A9.6 9.6 0 0 0 12 2a10 10 0 0 0-8.93 5.49l3.34 2.59C7.2 7.72 9.4 5.96 12 5.96Z"/></svg>${state.authBusy==='google'?'Connecting to Google…':'Continue with Google'}</button>`;
+  const emailField=`<div class="field"><label for="authEmail">Email address</label><input id="authEmail" class="input" type="email" name="email" value="${esc(state.authEmail)}" required autocomplete="email" inputmode="email" autocapitalize="none" spellcheck="false" placeholder="you@example.com"/></div>`;
+  let content;
+  if(welcome)content=`<div class="onboarding-copy"><span class="auth-eyebrow">A LITTLE FRIENDLY COMPETITION</span><h1>Your people.<br>Your game.<br><span>Your leaderboard.</span></h1><p>Play together. Keep score. Make every match count.</p></div><div class="auth-entry">${google}${button('Continue with email','emailSignIn','auth-email',disabled)}<p class="auth-caption">Good games start with a little Agree.</p></div>`;
+  else content=`<section class="auth-panel" aria-labelledby="authTitle" aria-busy="${!!state.authBusy}"><button type="button" class="auth-back" data-action="${reset||sent?'emailSignIn':'authWelcome'}" ${disabled}>← <span>${reset||sent?'Back to sign in':'All sign-in options'}</span></button><span class="auth-eyebrow">${sent?'ONE MORE STEP':reset?'LET’S GET YOU BACK IN':create?'JOIN THE GAME':'WELCOME BACK'}</span><h1 id="authTitle" tabindex="-1">${sent?'Check your inbox':reset?'Forgot password?':create?'Create your account':'Sign in with email'}</h1><p class="auth-description">${sent?`If an account uses <strong>${esc(state.authEmail)}</strong>, you’ll receive a password reset link. Check your spam folder too.`:reset?'Enter your email and we’ll send you a link to reset your password.':create?'A name, an email, and you’re ready to play.':'Your next match is waiting.'}</p>${sent?`${button('Back to sign in','emailSignIn','',disabled)}<button type="button" class="link-btn auth-switch" data-action="forgotPassword" ${disabled}>Try another email or resend</button>`:`<form id="authForm">${create?'<div class="field"><label for="authName">Unique username</label><input id="authName" class="input" name="displayName" minlength="3" maxlength="24" pattern="[A-Za-z0-9_]{3,24}" required placeholder="alex_21" autocomplete="username"/><span class="field-hint">3–24 letters, numbers or underscores. Must be unique.</span></div>':''}${emailField}${reset?'':`<div class="field"><label for="authPassword">Password</label><input id="authPassword" class="input" type="password" name="password" ${create?'minlength="6"':''} required autocomplete="${create?'new-password':'current-password'}" placeholder="${create?'At least 6 characters':'Enter your password'}"/>${create?'<span class="field-hint">Use at least 6 characters.</span>':''}</div>${create?'':'<button type="button" class="link-btn auth-forgot" data-action="forgotPassword">Forgot password?</button>'}`}<button class="btn" type="submit" ${disabled}>${reset?'Send reset link':create?'Create account':'Sign in'}</button></form>${reset?'':`<p class="auth-switch">${create?'Already have an account?':'New to Agree?'} <button type="button" class="link-btn" data-action="switchAuth" ${disabled}>${create?'Sign in':'Create account'}</button></p><div class="auth-divider"><span>or</span></div>${google}`}`}</section>`;
+  return `<main class="onboarding ${welcome?'is-welcome':'is-form'}"><div class="onboarding-background" aria-hidden="true"><div class="onboarding-court"></div><div class="onboarding-orb"></div></div><header class="onboarding-brand"><span class="onboarding-mark" aria-hidden="true">A</span> agree<span class="brand-period">.</span></header><div class="onboarding-body">${content}</div></main>`;
+}
+function changeAuthMode(mode){
+  if(state.authBusy)return;
+  state.authMode=mode;showAuthError('');render();
+  document.getElementById('authTitle')?.focus?.();
+}
 async function signInWithGoogle(){
   if(state.authBusy)return;
   if(!state.online){toast('Connect to the internet to sign in with Google.');return;}
-  showAuthError('');state.authBusy=true;render();
+  showAuthError('');state.authBusy='google';render();
   try{
     const provider=new GoogleAuthProvider();provider.setCustomParameters({prompt:'select_account'});
     await signInWithPopup(auth,provider);
@@ -204,20 +217,16 @@ async function signInWithGoogle(){
     showAuthError(messages[e.code]||authErrorText(e));
   }finally{state.authBusy=false;render();}
 }
-function profileSetup(){return `<div class="auth-wrap"><div class="auth-card"><div class="logo-mark">A</div><h1>Choose your name</h1><p>This is how friends will recognize you on their leaderboard.</p><form id="profileForm"><div class="field"><label>Display name</label><input class="input" name="displayName" minlength="2" maxlength="32" required placeholder="Your name" value="${esc(state.user?.displayName||'')}"/></div><button class="btn" type="submit">Continue</button></form>${button('Sign out','logout','ghost')}</div></div>`;}
+function profileSetup(){const suggested=(state.profile?.displayName||state.user?.displayName||'').replace(/[^A-Za-z0-9_]/g,'').slice(0,24),disabled=state.authBusy?'disabled':'';return `<div class="auth-wrap"><div class="auth-card"><div class="logo-mark">A</div><h1>Choose your unique username</h1><p>This is how friends will recognize you. Your username is reserved for your account.</p><form id="profileForm"><div class="field"><label for="onboardingName">Username</label><input id="onboardingName" class="input" name="displayName" minlength="3" maxlength="24" pattern="[A-Za-z0-9_]{3,24}" required placeholder="alex_21" autocomplete="username" value="${esc(suggested)}" aria-describedby="usernameHint"/><div id="usernameHint" class="field-hint">3–24 letters, numbers or underscores. Usernames must be unique, regardless of capitalization.</div></div><button class="btn" type="submit" ${disabled}>Save username & continue</button></form>${button('Sign out','logout','ghost')}</div></div>`;}
 function accountScreen(){return `<div class="auth-wrap"><div class="auth-card"><div class="logo-mark">A</div><h1>Welcome, ${esc(state.profile.displayName)}</h1><p>${esc(state.user.email)}</p>${note('','Your account is ready. Group leaderboards and matches are currently unavailable. Push notifications are turned off.')}<form id="profileForm"><div class="field"><label>Display name</label><input class="input" name="displayName" minlength="2" maxlength="32" required value="${esc(state.profile.displayName)}" autocomplete="nickname"/></div><button class="btn" type="submit">Save profile</button></form>${button('Sign out','logout','ghost')}</div></div>`;}
 function groupsScreen(){return `<div class="auth-wrap"><div class="auth-card"><div class="brand"><div class="brand-icon">A</div> Agree</div><h1>Choose a leaderboard</h1><p>You need an invitation to compete with friends, or you can start a new group.</p>${state.memberships.map(g=>`<button class="group-item" data-action="switchGroup" data-id="${esc(g.groupId)}"><div><strong>${esc(g.name)}</strong><div class="small quiet">Your group</div></div><span>→</span></button>`).join('')}${button('+ Create a new group','openCreateGroup')}${button('Join with invitation code','openJoinGroup','secondary')}<div style="margin-top:16px">${button('Sign out','logout','ghost')}</div></div></div>${state.dialog?modal():''}`;}
 async function call(name,data){if(!backendEnabled)throw new Error('Group leaderboards and matches are currently unavailable.');return firestoreApi(name,data);}
-async function saveUserProfile(displayName,user=auth.currentUser){
-  const ref=doc(store,'users',user.uid);
-  const current=await getDoc(ref);
-  await setDoc(ref,{displayName,updatedAt:serverTimestamp(),...(!current.exists()?{createdAt:serverTimestamp()}:{})},{merge:true});
-}
+async function saveUserProfile(displayName){return firestoreApi('saveProfile',{displayName});}
 async function saveOutbox(action){await enqueue(action);await refreshOutbox();toast(state.online?'Sending safely…':'Saved offline. Will send when you reopen online.');
   if(state.online)flushOutbox();else if(swReg?.sync)swReg.sync.register('agree-queued-actions').catch(()=>{});
 }
 async function refreshOutbox(){try{state.queue=state.user?await forUser(state.user.uid):[];render();}catch(e){toast('Offline storage unavailable: '+errText(e));}}
-async function flushOutbox(){if(!backendEnabled||flushBusy||!state.user||!state.online)return;flushBusy=true;
+async function flushOutbox(){if(!backendEnabled||flushBusy||!state.user||!state.profile?.username||!state.online)return;flushBusy=true;
   try{const replayUid=state.user.uid,jobs=await forUser(replayUid);
     for(const job of jobs){if(state.user?.uid!==replayUid||auth.currentUser?.uid!==replayUid)break;if(job.status==='blocked')continue;
       await patchAction(job.id,{status:'sending'});
@@ -272,7 +281,7 @@ async function enablePush(){
   }catch(e){console.error(e);toast('Push setup: '+errText(e));}
 }
 function ensureRoute(){
-  if(!backendEnabled||!state.user||!state.profile)return;
+  if(!backendEnabled||!state.user||!state.profile?.username)return;
   const route=state.route;
   if(route.groupId&&state.memberships.some(g=>g.groupId===route.groupId)){
     if(state.groupId!==route.groupId){state.groupId=route.groupId;localStorage.setItem('agree-group',route.groupId);listenGroup();}
@@ -314,12 +323,7 @@ async function authChanged(user){
   try{const profile=await getDoc(doc(store,'users',user.uid));
     if(state.user?.uid!==user.uid)return;
     state.profile=profile.exists()?profile.data():state.profile;
-    // Keep a chosen profile name; seed only a new Google user's profile.
-    if(!state.profile?.displayName&&user.providerData?.some(p=>p.providerId==='google.com')){
-      const displayName=(user.displayName||'').trim().slice(0,32);
-      if(displayName.length>=2){await saveUserProfile(displayName,user);if(state.user?.uid!==user.uid)return;state.profile={displayName};}
-    }
-    if(backendEnabled)listenUser(user.uid);state.authLoading=false;render();if(backendEnabled)await refreshOutbox();if(state.online){flushOutbox();syncPushToken();}}
+    if(backendEnabled&&state.profile?.username)listenUser(user.uid);state.authLoading=false;render();if(backendEnabled)await refreshOutbox();if(state.online){flushOutbox();syncPushToken();}}
   catch(e){state.authLoading=false;toast('Profile: '+errText(e));render();}
 }
 function start(){
@@ -335,7 +339,7 @@ function start(){
   auth=getAuth(firebaseApp);
   try{store=initializeFirestore(firebaseApp,{localCache:persistentLocalCache({tabManager:persistentMultipleTabManager()})});}
   catch(e){console.warn('Persistent cache unavailable; using memory fallback',e);store=getFirestore(firebaseApp);}
-  if(backendEnabled)firestoreApi=createFirestoreApi(store,auth,{doc,runTransaction,serverTimestamp});
+  firestoreApi=createFirestoreApi(store,auth,{doc,runTransaction,serverTimestamp,getDocs,collection,updateDoc});
   if('serviceWorker' in navigator){navigator.serviceWorker.register('/firebase-messaging-sw.js',{scope:'/'}).then(r=>{swReg=r;}).catch(e=>console.warn('PWA worker registration failed',e));
     navigator.serviceWorker.addEventListener('message',e=>{if(e.data?.type==='FLUSH_QUEUE')flushOutbox();});}
   if(pushEnabled)isSupported().then(s=>{if(!s)return; messaging=getMessaging(firebaseApp);onMessage(messaging,payload=>{
@@ -390,16 +394,19 @@ document.addEventListener('click',async e=>{
     else if(action==='flushNow')flushOutbox();
     else if(action==='enablePush')openDialog('enablePush');
     else if(action==='commitPush')await enablePush();
-    else if(action==='switchAuth'){state.authMode=state.authMode==='login'?'signup':'login';showAuthError('');render();}
+    else if(action==='switchAuth')changeAuthMode(state.authMode==='signup'?'login':'signup');
+    else if(action==='emailSignIn')changeAuthMode('login');
+    else if(action==='authWelcome')changeAuthMode('welcome');
+    else if(action==='forgotPassword')changeAuthMode('reset');
     else if(action==='logout'){
       if(pushEnabled&&!state.online){toast('Reconnect before signing out so notifications can be disabled safely.');return;}
       const did=localStorage.getItem('agree-device-id');
       if(pushEnabled&&did){try{await call('removeDevice',{deviceId:did});if(messaging)await deleteToken(messaging);}catch(error){toast('Could not disable device push; retry online before signing out.');return;}}
-      await signOut(auth);state.dialog=null;history.replaceState({},'','/');state.route=parsePath();toast('Signed out.');
+      await signOut(auth);state.authMode='welcome';state.authEmail='';state.dialog=null;render();history.replaceState({},'','/');state.route=parsePath();toast('Signed out.');
     }
   }catch(error){console.error(error);toast(errText(error));}
 });
-function preserveDraft(e){const form=e.target.closest?.('form');if(!form||!['newMatchForm','scoreForm','cancelForm'].includes(form.id)||!e.target.name)return;state.draft[e.target.name]=e.target.value;}
+function preserveDraft(e){if(e.target.name==='email'&&e.target.closest?.('#authForm'))state.authEmail=e.target.value;const form=e.target.closest?.('form');if(!form||!['newMatchForm','scoreForm','cancelForm'].includes(form.id)||!e.target.name)return;state.draft[e.target.name]=e.target.value;}
 document.addEventListener('input',preserveDraft);document.addEventListener('change',preserveDraft);
 document.addEventListener('submit',async e=>{
   const form=e.target;if(!['authForm','profileForm','createGroupForm','joinGroupForm','newMatchForm','scoreForm','cancelForm'].includes(form.id))return;
@@ -407,18 +414,23 @@ document.addEventListener('submit',async e=>{
   if(form.id==='authForm'&&state.authBusy)return;
   const submit=form.querySelector('[type=submit]');if(submit?.disabled)return;if(submit)submit.disabled=true;
   const d=Object.fromEntries(new FormData(form));
-  if(form.id==='authForm')showAuthError('');
+  if(form.id==='authForm'){showAuthError('');state.authBusy='email';state.authEmail=d.email.trim();document.querySelectorAll?.('.onboarding button, .onboarding input').forEach(el=>el.disabled=true);}
   try{
     if(form.id==='authForm'){
-      if(state.authMode==='signup'){
+      if(!state.online)throw {code:'auth/network-request-failed'};
+      if(state.authMode==='reset'){
+        try{await sendPasswordResetEmail(auth,d.email.trim());}catch(error){if(error.code!=='auth/user-not-found')throw error;}
+        state.authMode='resetSent';render();
+      }else if(state.authMode==='signup'){
         const res=await createUserWithEmailAndPassword(auth,d.email.trim(),d.password);
-        await updateProfile(res.user,{displayName:d.displayName.trim()});
-        await saveUserProfile(d.displayName.trim());
-        state.profile={displayName:d.displayName.trim()};render();
+        state.profile=await saveUserProfile(d.displayName.trim());
+        await updateProfile(res.user,{displayName:state.profile.displayName}).catch(e=>console.warn('Account display name could not be updated',e));
+        if(backendEnabled)listenUser(res.user.uid);ensureRoute();render();
       }else await signInWithEmailAndPassword(auth,d.email.trim(),d.password);
     }else if(form.id==='profileForm'){
-      await updateProfile(auth.currentUser,{displayName:d.displayName.trim()});await saveUserProfile(d.displayName.trim());
-      state.profile={displayName:d.displayName.trim()};ensureRoute();render();toast('Profile saved.');
+      state.profile=await saveUserProfile(d.displayName.trim());
+      await updateProfile(auth.currentUser,{displayName:state.profile.displayName}).catch(e=>console.warn('Account display name could not be updated',e));
+      if(backendEnabled)listenUser(auth.currentUser.uid);ensureRoute();render();if(state.online)flushOutbox();toast('Username saved.');
     }else if(form.id==='createGroupForm'){
       if(!state.online)throw new Error('Creating a group requires an internet connection.');
       const result=await call('createGroup',{actionId:uid(),name:d.name.trim()});state.dialog=null;
@@ -454,6 +466,6 @@ document.addEventListener('submit',async e=>{
       else await act('requestCancel',t,{note:d.note});
     }
   }catch(error){if(form.id==='authForm'&&!state.user)showAuthError(authErrorText(error));else{console.error(error);toast(errText(error));}}
-  finally{if(submit?.isConnected)submit.disabled=false;}
+  finally{if(form.id==='authForm'){state.authBusy=false;if(state.user||state.authMode==='resetSent'){render();document.getElementById('authTitle')?.focus?.();}else document.querySelectorAll?.('.onboarding button, .onboarding input').forEach(el=>el.disabled=false);}if(submit?.isConnected)submit.disabled=false;}
 });
 start();

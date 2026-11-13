@@ -5,7 +5,7 @@ The browser writes transactions through public/firestore-api.mjs. Firestore Rule
 ## Documents
 
 ```text
-users/{uid}: {displayName, createdAt, updatedAt}
+users/{uid}: {displayName, username, createdAt, updatedAt}
   memberships/{groupId}: {groupId, name, joinedAt}
   notifications/{actionId}: {kind, title, body, groupId, ticketId, path, createdAt, readAt}
 
@@ -25,9 +25,12 @@ groups/{groupId}: {name, creatorUid, inviteCode, createdAt, timeZone:"Asia/Kolka
   operations/{actionId}: {actor, ticketId, kind, version, createdAt}
 
 inviteCodes/{code}: {groupId, name, createdAt}
+usernames/{lowercaseName}: {uid, createdAt}
 ```
 
 Creation/action timestamps use server timestamp transforms checked against request.time. Ticket creation time, participants, creator and group are immutable. Scores are integers from 0 to 200. Season keys are not stored: the browser derives them from createdAt in Asia/Kolkata. Member counts derive from membership snapshots.
+
+Usernames are 3–24 letters, numbers or underscores. `username == displayName.lower()` is the canonical key. Onboarding atomically creates the reservation and saves it on the user document; rules require matching owners via `getAfter()`. Reservations cannot be reassigned/deleted, and an existing profile's username cannot change. Legacy profiles without a username complete this step on their next sign-in. Their creation timestamps are preserved, and group name snapshots are refreshed to match the chosen name.
 
 ## Group authorization
 

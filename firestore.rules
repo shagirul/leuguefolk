@@ -91,11 +91,17 @@ service cloud.firestore {
     }
     match /users/{uid} {
       allow read: if signedIn() && request.auth.uid == uid;
-      function validProfile() { return named(request.resource.data.displayName,2,32) && request.resource.data.updatedAt == request.time; }
+      function validProfile() {
+        let p = request.resource.data;
+        return p.displayName is string && p.displayName.matches('^[A-Za-z0-9_]{3,24}$')
+          && p.username == p.displayName.lower() && p.updatedAt == request.time
+          && getAfter(/databases/$(database)/documents/usernames/$(p.username)).data.uid == uid;
+      }
       allow create: if signedIn() && request.auth.uid == uid && validProfile()
-        && request.resource.data.keys().hasOnly(['displayName','createdAt','updatedAt']) && request.resource.data.createdAt == request.time;
+        && request.resource.data.keys().hasOnly(['displayName','username','createdAt','updatedAt']) && request.resource.data.createdAt == request.time;
       allow update: if signedIn() && request.auth.uid == uid && validProfile()
-        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['displayName','updatedAt']);
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['displayName','username','updatedAt'])
+        && (resource.data.get('username',null) == null || request.resource.data.username == resource.data.username);
       allow delete: if false;
       match /memberships/{gid} {
         allow read: if signedIn() && request.auth.uid == uid;
@@ -144,10 +150,14 @@ service cloud.firestore {
         allow create: if signedIn() && request.auth.uid == uid && uuid(gid)
           && request.resource.data.keys().hasOnly(['displayName','joinedAt','inviteCode']) && request.resource.data.joinedAt == request.time
           && request.resource.data.displayName == get(/databases/$(database)/documents/users/$(uid)).data.displayName
+          && get(/databases/$(database)/documents/users/$(uid)).data.username is string
           && code(request.resource.data.inviteCode)
           && getAfter(/databases/$(database)/documents/inviteCodes/$(request.resource.data.inviteCode)).data.groupId == gid
           && getAfter(/databases/$(database)/documents/users/$(uid)/memberships/$(gid)).data.joinedAt == request.time;
-        allow update, delete: if false;
+        allow update: if signedIn() && request.auth.uid == uid
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['displayName'])
+          && request.resource.data.displayName == get(/databases/$(database)/documents/users/$(uid)).data.displayName;
+        allow delete: if false;
       }
       match /tickets/{tid} {
         allow read: if member(gid);
@@ -183,6 +193,16 @@ service cloud.firestore {
           && request.resource.data.kind == getAfter(/databases/$(database)/documents/groups/$(gid)/tickets/$(request.resource.data.ticketId)).data.action.kind;
         allow update, delete: if false;
       }
+    }
+    match /usernames/{username} {
+      allow get: if signedIn();
+      allow list: if false;
+      allow create: if signedIn() && username.matches('^[a-z0-9_]{3,24}$')
+        && request.resource.data.keys().hasOnly(['uid','createdAt']) && request.resource.data.uid == request.auth.uid
+        && request.resource.data.createdAt == request.time
+        && getAfter(/databases/$(database)/documents/users/$(request.auth.uid)).data.username == username
+        && getAfter(/databases/$(database)/documents/users/$(request.auth.uid)).data.updatedAt == request.time;
+      allow update, delete: if false;
     }
     match /inviteCodes/{inviteCode} {
       // A code is a capability: authenticated exact lookups are allowed; enumeration is denied.

@@ -23,6 +23,12 @@ Deployment publishes **only Firestore rules/indexes and Hosting**. Spark quotas 
 
 For local UI development, run `npm run serve` and open **http://localhost:5000**. Local files connect to the configured live Authentication/Firestore project. Isolated tests use separate demo-project emulators; the app does not silently redirect production writes to local emulators. Do not use file://.
 
+## Onboarding and password recovery
+
+Email sign-up asks for a unique username. Google users and existing accounts without a reserved username choose one after signing in. Names use 3–24 letters, numbers or underscores and are unique regardless of capitalization. A transaction reserves `usernames/{lowercaseName}` together with the user's profile; Security Rules prevent duplicate claims and later username changes. Existing group name snapshots refresh after onboarding.
+
+On the email sign-in screen, **Forgot password?** sends a reset email using Firebase Authentication. The link opens Firebase's hosted password-reset page. The confirmation is the same for registered and unregistered addresses; check the inbox and spam folder. The default Firebase reset template works without a custom email service. Customize it later in Authentication → Templates → Password reset if needed.
+
 ## Security and transactions
 
 - public/firestore-api.mjs coordinates transactions. Firestore Rules independently validate the actor, invitation proof, membership, legal transition, exact accepted score, immutable fields and server timestamps. Client JavaScript is not a security boundary.
@@ -30,7 +36,7 @@ For local UI development, run `npm run serve` and open **http://localhost:5000**
 - Each match action atomically writes the ticket, immutable operation, audit event and recipient's private notification. Rules use getAfter() to require all companion records.
 - Only the current recipient can confirm a proposal. A proposer cannot confirm their own score. A verified score remains active until the other player accepts a change or mutual void.
 - Each action has a stable UUID. Replaying it returns its previous result. Every match change increments version; stale queued versions and proposal/amendment revisions are rejected.
-- Groups, invitations and member records are immutable in this version. Leaving/deleting groups and rotating invitation codes are not implemented. Group creation grants no moderation power.
+- Groups and invitations are immutable in this version. A member may refresh only their own name snapshot to match their profile. Leaving/deleting groups and rotating invitation codes are not implemented. Group creation grants no moderation power.
 
 ## Rankings
 

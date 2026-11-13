@@ -2,7 +2,7 @@ import {advance,validScore,note,fail} from './domain.mjs';
 
 // The browser coordinates atomic writes; Firestore Rules independently authorize every field.
 // Inject the SDK so the same implementation can be exercised against the local emulators.
-export function createFirestoreApi(store,auth,{doc,runTransaction,serverTimestamp}){
+export function createFirestoreApi(store,auth,{doc,runTransaction,serverTimestamp,getDocs,collection,updateDoc}){
   const id=value=>{if(typeof value!=='string'||!(/^[a-f\d-]{36}$/i).test(value))fail('Invalid action or group ID.','invalid-argument');return value;};
   const text=(value,min,max)=>{if(typeof value!=='string'||value.trim().length<min||value.trim().length>max)fail(`Enter ${min}–${max} characters.`,'invalid-argument');return value.trim();};
   const ref=(...parts)=>doc(store,...parts);
@@ -12,6 +12,24 @@ export function createFirestoreApi(store,auth,{doc,runTransaction,serverTimestam
   const membership=(uid,gid)=>ref('users',uid,'memberships',gid);
   const ticket=(gid,tid)=>ref('groups',gid,'tickets',tid);
   const operation=(gid,aid)=>ref('groups',gid,'operations',aid);
+  async function saveProfile(data,uid){
+    const displayName=text(data.displayName,3,24);
+    if(!/^[A-Za-z0-9_]{3,24}$/.test(displayName))fail('Use 3–24 letters, numbers or underscores for your username.','invalid-argument');
+    const username=displayName.toLowerCase();
+    const result=await runTransaction(store,async tx=>{
+      const [own,reserved]=await Promise.all([tx.get(profile(uid)),tx.get(ref('usernames',username))]);
+      if(own.exists()&&own.data().username&&own.data().username!==username)fail('Your username cannot be changed after onboarding.');
+      if(reserved.exists()&&reserved.data().uid!==uid)fail('That username is already taken. Please choose another.','already-exists');
+      const now=serverTimestamp();
+      if(!reserved.exists())tx.set(ref('usernames',username),{uid,createdAt:now});
+      tx.set(profile(uid),{displayName,username,updatedAt:now,...(!own.exists()?{createdAt:now}:{})},{merge:true});
+      return {displayName,username};
+    });
+    // Existing groups keep name snapshots; refresh only this member's name after onboarding.
+    const groups=await getDocs(collection(store,'users',uid,'memberships'));
+    await Promise.all(groups.docs.map(g=>updateDoc(member(g.id,uid),{displayName})));
+    return result;
+  }
   function writeAction(tx,gid,tid,aid,actor,kind,t,event,target){
     const now=serverTimestamp();
     tx.set(ticket(gid,tid),t);
@@ -99,6 +117,7 @@ export function createFirestoreApi(store,auth,{doc,runTransaction,serverTimestam
   return async(name,data={})=>{
     const user=auth.currentUser;if(!user)fail('Sign in first.','unauthenticated');
     switch(name){
+      case 'saveProfile':return saveProfile(data,user.uid);
       case 'createGroup':return createGroup(data,user.uid);
       case 'joinGroup':return joinGroup(data,user.uid);
       case 'submitMatch':return submitMatch(data,user.uid);

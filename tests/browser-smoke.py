@@ -19,12 +19,13 @@ export const onAuthStateChanged=(auth,cb)=>{setTimeout(()=>cb({uid:'alice_test_u
 FIRESTORE="""
 const GID='{GID}';const TID='{TID}';const UID='{UID}';const BOB='{BOB}';
 export const getFirestore=()=>({});export const initializeFirestore=()=>({});
+export const getDocs=async()=>({docs:[]});
 export const persistentLocalCache=()=>({});export const persistentMultipleTabManager=()=>({});
 export const doc=(_, ...parts)=>({type:'doc',parts});
 export const collection=(_, ...parts)=>({type:'col',parts});
 export const query=(ref)=>ref;export const orderBy=()=>null;export const limit=()=>null;
 export const serverTimestamp=()=>new Date();export const updateDoc=async()=>{};
-export const getDoc=async(ref)=>({exists:()=>true,data:()=>({{displayName:'Alex'}})});
+export const getDoc=async(ref)=>({exists:()=>true,data:()=>({{displayName:'Alex',username:'alex'}})});
 const snap=(items)=>({{docs:items.map(x=>({{id:x.id,data:()=>x.data}}))}});
 export const onSnapshot=(ref,callback,error)=>{{
  const p=ref.parts;let result;
