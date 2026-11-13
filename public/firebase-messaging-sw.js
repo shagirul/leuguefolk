@@ -1,7 +1,7 @@
 /* ONE worker for app-shell caching AND FCM background notifications.
  * Register notificationclick BEFORE importing Firebase: its default handler can otherwise override yours.
  */
-const CACHE='agree-shell-v3';
+const CACHE='agree-shell-v7';
 const SDK_CACHE='agree-firebase-sdk-v1';
 const FIREBASE_SDK=['firebase-app.js','firebase-auth.js','firebase-firestore.js','firebase-messaging.js'].map(f=>`https://www.gstatic.com/firebasejs/12.19.0/${f}`);
 const PRECACHE=['/','/index.html','/styles.css','/app.js','/firestore-api.mjs','/domain.mjs','/queue.js','/manifest.webmanifest','/firebase-config.js','/icons/icon-192.png','/icons/icon-512.png'];
@@ -39,33 +39,39 @@ self.addEventListener('activate',event=>{
     await self.clients.claim();
   })());
 });
+// Clone while the body is still unused; keep cache I/O alive without delaying the response.
+function cacheResponse(event,name,request,response){
+  if(!response.ok)return;
+  const copy=response.clone();
+  event.waitUntil(caches.open(name).then(cache=>cache.put(request,copy)).catch(error=>console.warn('[Agree SW] Cache update failed.',error)));
+}
 self.addEventListener('fetch',event=>{
   const req=event.request;if(req.method!=='GET')return;
   const url=new URL(req.url);
   if(url.hostname==='www.gstatic.com'&&url.pathname.startsWith('/firebasejs/12.19.0/')){
     event.respondWith((async()=>{
       const cache=await caches.open(SDK_CACHE);const hit=await cache.match(req);if(hit)return hit;
-      const response=await fetch(req);if(response.ok)cache.put(req,response.clone());return response;
+      const response=await fetch(req);cacheResponse(event,SDK_CACHE,req,response);return response;
     })());return;
   }
   if(url.origin!==self.location.origin)return;
   if(req.mode==='navigate'){
     event.respondWith((async()=>{
-      try{const fresh=await fetch(req);if(fresh.ok){const cache=await caches.open(CACHE);cache.put('/index.html',fresh.clone());}return fresh;}
+      try{const fresh=await fetch(req);cacheResponse(event,CACHE,'/index.html',fresh);return fresh;}
       catch{const hit=await caches.match('/index.html');return hit||Response.error();}
     })());return;
   }
   // Config prefers fresh online, cached copy as offline fallback.
   if(url.pathname==='/firebase-config.js'){
-    event.respondWith(fetch(req).then(r=>{if(r.ok)caches.open(CACHE).then(c=>c.put(req,r.clone()));return r;}).catch(()=>caches.match(req)));return;
+    event.respondWith(fetch(req).then(r=>{cacheResponse(event,CACHE,req,r);return r;}).catch(()=>caches.match(req).then(r=>r||Response.error())));return;
   }
   if(PRECACHE.includes(url.pathname)){
     // Refresh app code when online, or installed PWAs can be stuck on outdated assets.
     if(['/app.js','/firestore-api.mjs','/domain.mjs','/queue.js','/styles.css','/manifest.webmanifest'].includes(url.pathname)){
-      event.respondWith(fetch(req).then(r=>{if(r.ok)caches.open(CACHE).then(c=>c.put(req,r.clone()));return r;})
+      event.respondWith(fetch(req).then(r=>{cacheResponse(event,CACHE,req,r);return r;})
         .catch(()=>caches.match(req).then(r=>r||Response.error())));return;
     }
-    event.respondWith(caches.match(req).then(hit=>hit||fetch(req).then(r=>{if(r.ok)caches.open(CACHE).then(c=>c.put(req,r.clone()));return r;})));return;
+    event.respondWith(caches.match(req).then(hit=>hit||fetch(req).then(r=>{cacheResponse(event,CACHE,req,r);return r;})));return;
   }
 });
 self.addEventListener('sync',event=>{

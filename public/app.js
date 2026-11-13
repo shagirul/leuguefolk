@@ -12,8 +12,9 @@ const ready=!!settings.firebaseConfig?.apiKey&&!settings.firebaseConfig.apiKey.s
 const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const short=s=>String(s??'').slice(0,100);
 const uid=()=>crypto.randomUUID();
-const state={user:null,profile:null,memberships:[],groupId:null,group:null,members:[],tickets:[],notifications:[],ticketEvents:[],queue:[],online:navigator.onLine,route:parsePath(),period:'weekly',matchTab:'all',dialog:null,draft:{},authMode:'welcome',authEmail:'',authBusy:false,notice:null,loadError:'',authLoading:true,groupLoading:false,initialized:false};
+const state={user:null,profile:null,memberships:[],groupId:null,group:null,members:[],tickets:[],notifications:[],ticketEvents:[],queue:[],online:navigator.onLine,route:parsePath(),period:'weekly',matchTab:'all',dialog:null,draft:{},authMode:'welcome',authEmail:'',authBusy:false,notice:null,loadError:'',authLoading:true,groupLoading:false,showGroupPicker:false,initialized:false};
 const unsub={};let firebaseApp,auth,store,firestoreApi,messaging=null,swReg=null,flushBusy=false,toastTimeout,lastPushSync=0;
+let groupLoadTimer=null,groupListenerVersion=0;
 function when(value){return value?.toDate?value.toDate():(value?new Date(value):null);}
 function dateShort(value){const d=when(value);return d&&!Number.isNaN(+d)?d.toLocaleString('en-IN',{day:'numeric',month:'short',hour:'numeric',minute:'2-digit'}):'Just now';}
 function parsePath(){const p=decodeURI(location.pathname);const match=p.match(/^\/g\/([a-f0-9-]{36})(?:\/(t\/([a-f0-9-]{36})|matches|leaderboard|inbox|profile|new))?\/?$/i);return match?{groupId:match[1],view:match[3]?'ticket':match[2]||'leaderboard',ticketId:match[3]}:{groupId:null,view:'leaderboard'};}
@@ -21,7 +22,7 @@ function periodKeys(date){const parts=Object.fromEntries(new Intl.DateTimeFormat
 const userName=userId=>state.members.find(m=>m.id===userId)?.displayName||((state.user?.uid===userId)?(state.profile?.displayName||'You'):'Player');
 const other=t=>t.playerA===state.user?.uid?t.playerB:t.playerA;
 const myGroup=()=>state.memberships.some(g=>g.groupId===state.groupId);
-function navigate(path){history.pushState({},'',path);state.route=parsePath();state.dialog=null;state.draft={};ensureRoute();render();window.scrollTo({top:0,behavior:'instant'});}
+function navigate(path){history.pushState({},'',path);state.showGroupPicker=false;state.route=parsePath();state.dialog=null;state.draft={};ensureRoute();render();window.scrollTo({top:0,behavior:'instant'});}
 function go(view){navigate(`/g/${state.groupId}/${view}`);}
 function badge(text,tone='purple'){return `<span class="badge ${tone}">${esc(text)}</span>`;}
 function xp(score){return Number(score||0)*2;}
@@ -49,7 +50,10 @@ function icon(s){return `<span aria-hidden="true">${s}</span>`;}
 function button(label,action,kind='',attrs=''){return `<button type="button" class="btn ${kind}" data-action="${esc(action)}" ${attrs}>${label}</button>`;}
 function subscribed(key,subscribe){unsub[key]?.();unsub[key]=subscribe;}
 function unsubscribeAll(){Object.keys(unsub).forEach(k=>{unsub[k]?.();delete unsub[k];});}
-function stopGroupListeners(){['group','members','tickets','events'].forEach(k=>{unsub[k]?.();delete unsub[k];});state.group=null;state.members=[];state.tickets=[];state.ticketEvents=[];}
+function stopGroupListeners(){
+  clearTimeout(groupLoadTimer);groupLoadTimer=null;groupListenerVersion++;state.groupLoading=false;
+  ['group','members','tickets','events'].forEach(k=>{unsub[k]?.();delete unsub[k];});state.group=null;state.members=[];state.tickets=[];state.ticketEvents=[];
+}
 function groupPath(view='leaderboard'){return `/g/${state.groupId}/${view}`;}
 function shell(title,content,active='leaderboard',back=false,side=''){
   const unread=state.notifications.some(n=>!n.readAt);
@@ -171,8 +175,8 @@ function render(){
   if(!state.user){root.innerHTML=authScreen();return;}
   if(!state.profile?.username){root.innerHTML=profileSetup();return;}
   if(!backendEnabled){root.innerHTML=accountScreen();return;}
-  if(!state.groupId||!myGroup()){root.innerHTML=groupsScreen();return;}
-  if(!state.group){root.innerHTML=`<div class="loading"><div class="logo-mark">A</div><h1>Loading group…</h1><p>${esc(state.loadError||'Getting the latest matches')}</p></div>`;return;}
+  if(state.showGroupPicker||!state.groupId||!myGroup()){root.innerHTML=groupsScreen();return;}
+  if(!state.group){root.innerHTML=groupStatusScreen();return;}
   const v=state.route.view;
   const match=state.tickets.find(t=>t.id===state.route.ticketId);
   let content='',active=v,title='Leaderboard',back=false;
@@ -184,6 +188,11 @@ function render(){
   else if(v==='profile'){title='Profile';content=profileContent();}
   else {content=rankContent();active='leaderboard';}
   root.innerHTML=shell(title,content,active,back);
+}
+function groupStatusScreen(){
+  const title=state.groupLoading?'Loading group…':'Group unavailable';
+  const message=state.groupLoading?'Getting the latest matches…':state.loadError||'Choose another group or try loading this group again.';
+  return onboardingShell(`<section class="auth-panel"><h1>${title}</h1><p class="auth-description" role="status">${esc(message)}</p>${!state.groupLoading?button('Try again','retryGroup'):''}${button('Choose another group','showGroups','secondary')}</section>`);
 }
 function authScreen(){
   const mode=state.authMode,create=mode==='signup',reset=mode==='reset',sent=mode==='resetSent',welcome=mode==='welcome',disabled=state.authBusy?'disabled':'';
@@ -282,25 +291,36 @@ async function enablePush(){
   }catch(e){console.error(e);toast('Push setup: '+errText(e));}
 }
 function ensureRoute(){
-  if(!backendEnabled||!state.user||!state.profile?.username)return;
+  if(!backendEnabled||!state.user||!state.profile?.username||state.showGroupPicker)return;
   const route=state.route;
   if(route.groupId&&state.memberships.some(g=>g.groupId===route.groupId)){
     if(state.groupId!==route.groupId){state.groupId=route.groupId;localStorage.setItem('agree-group',route.groupId);listenGroup();}
     if(route.view==='ticket')listenEvents(route.ticketId);
     return;
   }
-  if(route.groupId&&!state.memberships.some(g=>g.groupId===route.groupId)){
-    state.groupId=null;stopGroupListeners();return; // preserve deep link for sign in with correct account
-  }
+  if(route.groupId){state.groupId=null;stopGroupListeners();return;}
   const selected=state.memberships.some(g=>g.groupId===state.groupId)?state.groupId:(state.memberships.find(g=>g.groupId===localStorage.getItem('agree-group'))?.groupId||state.memberships[0]?.groupId);
-  if(selected){state.groupId=selected;localStorage.setItem('agree-group',selected);listenGroup();}
+  if(selected&&state.groupId!==selected){state.groupId=selected;localStorage.setItem('agree-group',selected);listenGroup();}
+  else if(!selected&&state.groupId){state.groupId=null;stopGroupListeners();}
 }
-function listenGroup(){if(!state.groupId||!store||!state.user)return;
+function listenGroup(){
+  if(!state.groupId||!store||!state.user)return;
   const id=state.groupId;
-  stopGroupListeners();
-  subscribed('group',onSnapshot(doc(store,'groups',id),snap=>{if(state.groupId!==id)return;state.group=snap.exists()?{id:snap.id,...snap.data()}:null;render();},e=>{state.loadError=errText(e);render();}));
-  subscribed('members',onSnapshot(collection(store,'groups',id,'members'),snap=>{if(state.groupId!==id)return;state.members=snap.docs.map(d=>({id:d.id,...d.data()}));render();},e=>toast(errText(e))));
-  subscribed('tickets',onSnapshot(collection(store,'groups',id,'tickets'),snap=>{if(state.groupId!==id)return;state.tickets=snap.docs.map(d=>({id:d.id,...d.data()}));render();},e=>toast(errText(e))));
+  stopGroupListeners();state.loadError='';state.groupLoading=true;
+  const generation=groupListenerVersion;
+  const active=()=>state.groupId===id&&generation===groupListenerVersion&&!state.showGroupPicker;
+  const failGroup=message=>{if(!active())return;stopGroupListeners();state.loadError=message;render();};
+  groupLoadTimer=setTimeout(()=>failGroup('This group is taking too long to load. Check your connection and try again.'),12000);
+  subscribed('group',onSnapshot(doc(store,'groups',id),snap=>{
+    if(!active())return;
+    if(!snap.exists()){
+      if(snap.metadata?.fromCache&&state.online)return;
+      failGroup(state.online?'This group is no longer available. Choose another group or join using an invitation code.':'This group is not available offline. Reconnect and try again.');return;
+    }
+    clearTimeout(groupLoadTimer);groupLoadTimer=null;state.groupLoading=false;state.loadError='';state.group={id:snap.id,...snap.data()};render();
+  },e=>failGroup(e.code==='permission-denied'?'You do not have access to this group. Choose another group or join with an invitation code.':'Could not load this group: '+errText(e))));
+  subscribed('members',onSnapshot(collection(store,'groups',id,'members'),snap=>{if(!active())return;state.members=snap.docs.map(d=>({id:d.id,...d.data()}));render();},e=>{if(active())toast(errText(e));}));
+  subscribed('tickets',onSnapshot(collection(store,'groups',id,'tickets'),snap=>{if(!active())return;state.tickets=snap.docs.map(d=>({id:d.id,...d.data()}));render();},e=>{if(active())toast(errText(e));}));
   if(state.route.view==='ticket')listenEvents(state.route.ticketId);
 }
 function listenEvents(ticketId){if(!state.groupId||!ticketId)return;const gid=state.groupId;
@@ -319,7 +339,7 @@ function listenUser(uidValue){
   },e=>toast(errText(e))));
 }
 async function authChanged(user){
-  unsubscribeAll();stopGroupListeners();state.user=user;state.groupId=null;state.profile=null;state.memberships=[];state.notifications=[];state.queue=[];
+  unsubscribeAll();stopGroupListeners();state.user=user;state.showGroupPicker=false;state.groupId=null;state.profile=null;state.memberships=[];state.notifications=[];state.queue=[];
   if(!user){state.authLoading=false;render();return;}
   try{const profile=await getDoc(doc(store,'users',user.uid));
     if(state.user?.uid!==user.uid)return;
@@ -348,7 +368,7 @@ function start(){
   });}).catch(e=>console.warn('FCM not supported',e));
   onAuthStateChanged(auth,authChanged);
 }
-window.addEventListener('popstate',()=>{state.route=parsePath();state.dialog=null;ensureRoute();render();});
+window.addEventListener('popstate',()=>{state.showGroupPicker=false;state.route=parsePath();state.dialog=null;ensureRoute();render();});
 window.addEventListener('online',()=>{state.online=true;render();flushOutbox();syncPushToken();});
 window.addEventListener('offline',()=>{state.online=false;render();});
 document.addEventListener('visibilitychange',()=>{if(document.visibilityState==='visible'){state.online=navigator.onLine;flushOutbox();syncPushToken();}});
@@ -359,6 +379,8 @@ document.addEventListener('click',async e=>{
   const action=b.dataset.action,id=b.dataset.id,t=state.tickets.find(v=>v.id===state.route.ticketId);
   try{
     if(action==='googleSignIn')await signInWithGoogle();
+    else if(action==='retryGroup'){listenGroup();render();}
+    else if(action==='showGroups'){state.showGroupPicker=true;state.groupId=null;stopGroupListeners();state.loadError='';history.replaceState({},'','/');state.route=parsePath();render();}
     else if(action==='back'){if(state.dialog){state.dialog=null;render();}else go('matches');}
     else if(action==='nav')go(b.dataset.view);
     else if(action==='newMatch')go('new');
