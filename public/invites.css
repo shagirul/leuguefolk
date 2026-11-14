@@ -1,0 +1,17 @@
+.invite-page{padding-bottom:calc(24px + env(safe-area-inset-bottom))}
+.invite-body{padding-top:12px}
+.invite-card{padding:22px 20px;border:1px solid #e6dcf0;border-radius:24px;background:#ffffffa8;box-shadow:0 10px 30px #4026b409;text-align:center}
+.invite-roster-heading{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:18px}.invite-roster-heading h2{font-size:12px;font-weight:700;margin:0}.invite-roster-heading>span{font-size:9px;color:#857294}
+.invite-player-grid{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:15px 9px;margin:0 0 24px;padding:0;list-style:none}
+.invite-player-grid>li{display:flex;align-items:center;flex-direction:column;gap:6px;min-width:0}.invite-player-grid .avatar{width:46px;height:46px;background:#ece2f7;border-color:#e1d3ee}.invite-player-grid .character-art{transform:scale(1.15);transform-origin:50% 60%}
+.invite-player-grid li>span:last-child{max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:9px;color:#715681}
+.invite-group-mark{display:grid;place-items:center;width:38px;height:38px;margin:0 auto 14px;border-radius:13px;background:#ede3f8;color:#8c61b2}.invite-group-mark svg{width:24px;height:24px}
+.invite-card h1{font-size:24px;font-weight:800;line-height:1.25;letter-spacing:-.7px;margin:0;overflow-wrap:anywhere}.invite-card h1>span{display:block}
+.invite-description{font-size:12px;line-height:1.5;color:#857294;margin:12px 0 0}
+.invite-actions{display:grid;grid-template-columns:1fr 1.4fr;gap:10px;margin-top:24px}.invite-actions .btn{height:44px;min-height:44px;border-radius:999px;padding:0 14px;font-size:14px;font-weight:650}.invite-actions .secondary{background:#eee5f8;color:#785497}
+.invite-error{font-size:12px;line-height:1.6;color:#986058;margin:16px 0 0}
+.invite-account{display:flex;align-items:center;justify-content:center;gap:9px;margin:12px 0 -8px;font-size:10px;color:#9784a4}.invite-account>span{max-width:50%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.invite-account>button{min-height:44px;padding:0 3px;border:0;background:none;color:#785497;font-size:10px;font-weight:650}
+.invite-loading{display:flex;align-items:center;flex-direction:column;gap:16px;min-height:140px;justify-content:center;font-size:12px;color:#857294}.invite-loading>span{width:26px;height:26px;border:3px solid #e6daf2;border-top-color:#8055b0;border-radius:50%;animation:invite-spin .8s linear infinite}
+@keyframes invite-spin{to{transform:rotate(360deg)}}
+@media(max-width:350px){.invite-card{padding:20px 14px}.invite-player-grid{gap:13px 6px}.invite-player-grid .avatar{width:39px;height:39px}.invite-card h1{font-size:22px}.league-group-option{gap:9px;padding-inline:10px}.league-group-avatars>.avatar{width:31px;height:31px;margin-left:-12px}}
+@media(prefers-reduced-motion:reduce){.invite-loading>span{animation:none}}

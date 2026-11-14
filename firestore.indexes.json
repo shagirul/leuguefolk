@@ -1,1 +1,4 @@
-{ "indexes": [], "fieldOverrides": [] }
+{
+  "indexes": [{"collectionGroup":"players","queryScope":"COLLECTION","fields":[{"fieldPath":"xp","order":"DESCENDING"},{"fieldPath":"wins","order":"DESCENDING"},{"fieldPath":"displayName","order":"ASCENDING"}]}],
+  "fieldOverrides": []
+}

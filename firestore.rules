@@ -8,6 +8,7 @@ service cloud.firestore {
     function uuid(value) { return value is string && value.matches('^[a-fA-F0-9-]{36}$'); }
     function code(value) { return value is string && value.matches('^[A-Z2-9]{8}$'); }
     function named(value,min,max) { return value is string && value.size() >= min && value.size() <= max; }
+    function validAvatar(value) { return value in ['istj-anchor','estj-captain','isfj-guardian','esfj-connector','esfp-showstopper','isfp-freebird','estp-daredevil','istp-virtuoso','infj-oracle','enfj-catalyst','infp-dreamer','enfp-spark','intp-analyst','entp-maverick','intj-strategist','entj-conqueror']; }
     function score(s) { return s is map && s.keys().hasOnly(['a','b']) && s.a is int && s.b is int && s.a >= 0 && s.a <= 200 && s.b >= 0 && s.b <= 200; }
     function opponent(t,uid) { return uid == t.playerA ? t.playerB : t.playerA; }
     function participant(t) { return signedIn() && request.auth.uid in [t.playerA,t.playerB]; }
@@ -50,7 +51,7 @@ service cloud.firestore {
     }
     function changed(fields) { return request.resource.data.diff(resource.data).affectedKeys().hasOnly(fields.concat(['updatedAt','version','action'])); }
     function open(t) { return t.status == 'open' && t.cancellation == null; }
-    function transition(t,n) {
+    function openTransition(t,n) {
       let actor = request.auth.uid;
       let kind = n.action.kind;
       return (kind == 'confirm' && open(t) && t.turn == actor
@@ -67,19 +68,24 @@ service cloud.firestore {
           && n.cancellation.by == actor && n.cancellation.turn == opponent(t,actor) && n.cancellation.at == request.time)
         || (kind == 'respondCancel' && t.status == 'open' && t.cancellation != null && t.cancellation.turn == actor
           && changed(['status','turn','cancellation']) && n.cancellation == null
-          && ((n.status == 'open' && n.turn == t.turn) || n.status == 'cancelled'))
-        || (kind == 'startAmendment' && t.status == 'finalized' && t.amendment == null && changed(['amendment'])
+          && ((n.status == 'open' && n.turn == t.turn) || n.status == 'cancelled'));
+    }
+    function verifiedTransition(t,n) {
+      let actor = request.auth.uid;
+      let kind = n.action.kind;
+      return (kind == 'startAmendment' && t.amendment == null && changed(['amendment'])
           && n.amendment != null && n.amendment.by == actor && n.amendment.turn == opponent(t,actor) && n.amendment.revision == 1 && n.amendment.at == request.time)
-        || (kind == 'counterAmendment' && t.status == 'finalized' && t.amendment != null && t.amendment.kind == 'score'
+        || (kind == 'counterAmendment' && t.amendment != null && t.amendment.kind == 'score'
           && t.amendment.turn == actor && t.amendment.revision < 30 && changed(['amendment'])
           && n.amendment != null && n.amendment.kind == 'score' && n.amendment.by == actor && n.amendment.turn == opponent(t,actor)
           && n.amendment.revision == t.amendment.revision + 1 && n.amendment.at == request.time)
-        || (kind == 'respondAmendment' && t.status == 'finalized' && t.amendment != null && t.amendment.turn == actor
+        || (kind == 'respondAmendment' && t.amendment != null && t.amendment.turn == actor
           && changed(['amendment','status','finalScore']) && n.amendment == null
           && ((n.status == 'finalized' && n.finalScore == t.finalScore)
             || (t.amendment.kind == 'score' && n.status == 'finalized' && n.finalScore == t.amendment.score)
             || (t.amendment.kind == 'void' && n.status == 'cancelled' && n.finalScore == null)));
     }
+    function transition(t,n) { return t.status == 'finalized' ? verifiedTransition(t,n) : openTransition(t,n); }
     function actionTicket(gid,tid,aid) {
       let t = getAfter(/databases/$(database)/documents/groups/$(gid)/tickets/$(tid)).data;
       return member(gid) && participant(t) && t.action.id == aid && t.action.actor == request.auth.uid && t.updatedAt == request.time;
@@ -89,18 +95,33 @@ service cloud.firestore {
         : (t.action.kind == 'confirm' ? t.finalScore
           : (t.action.kind in ['startAmendment','counterAmendment'] ? t.amendment.score : null));
     }
+    function previewPath(invite,uid) { return /databases/$(database)/documents/inviteCodes/$(invite)/players/$(uid); }
+    function rankXp(t,uid) { return t.status == 'finalized' ? (uid == t.playerA ? t.finalScore.a : t.finalScore.b) * 2 : 0; }
+    function rankPlayed(t) { return t.status == 'finalized' ? 1 : 0; }
+    function rankWins(t,uid) { return t.status == 'finalized' && (uid == t.playerA ? t.finalScore.a > t.finalScore.b : t.finalScore.b > t.finalScore.a) ? 1 : 0; }
+    function rankingChanged(t,n) {
+      return (t.status == 'finalized' || n.status == 'finalized') && (t.status != n.status || t.finalScore != n.finalScore);
+    }
+    function rankingWritten(t,gid,tid) {
+      let invite = get(groupPath(gid)).data.inviteCode;
+      let a = getAfter(previewPath(invite,t.playerA)).data;
+      let b = getAfter(previewPath(invite,t.playerB)).data;
+      return a.lastTicketId == tid && b.lastTicketId == tid && a.lastActionId == t.action.id && b.lastActionId == t.action.id
+        && a.updatedAt == request.time && b.updatedAt == request.time;
+    }
     match /users/{uid} {
       allow read: if signedIn() && request.auth.uid == uid;
       function validProfile() {
         let p = request.resource.data;
         return p.displayName is string && p.displayName.matches('^[A-Za-z0-9_]{3,24}$')
           && p.username == p.displayName.lower() && p.updatedAt == request.time
+          && validAvatar(p.avatarId)
           && getAfter(/databases/$(database)/documents/usernames/$(p.username)).data.uid == uid;
       }
       allow create: if signedIn() && request.auth.uid == uid && validProfile()
-        && request.resource.data.keys().hasOnly(['displayName','username','createdAt','updatedAt']) && request.resource.data.createdAt == request.time;
+        && request.resource.data.keys().hasOnly(['displayName','username','avatarId','createdAt','updatedAt']) && request.resource.data.createdAt == request.time;
       allow update: if signedIn() && request.auth.uid == uid && validProfile()
-        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['displayName','username','updatedAt'])
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['displayName','username','avatarId','updatedAt'])
         && (resource.data.get('username',null) == null || request.resource.data.username == resource.data.username);
       allow delete: if false;
       match /memberships/{gid} {
@@ -148,15 +169,18 @@ service cloud.firestore {
         allow read: if member(gid);
         allow get: if signedIn() && request.auth.uid == uid;
         allow create: if signedIn() && request.auth.uid == uid && uuid(gid)
-          && request.resource.data.keys().hasOnly(['displayName','joinedAt','inviteCode']) && request.resource.data.joinedAt == request.time
+          && request.resource.data.keys().hasOnly(['displayName','avatarId','joinedAt','inviteCode']) && request.resource.data.joinedAt == request.time
           && request.resource.data.displayName == get(/databases/$(database)/documents/users/$(uid)).data.displayName
+          && request.resource.data.avatarId == get(/databases/$(database)/documents/users/$(uid)).data.avatarId
           && get(/databases/$(database)/documents/users/$(uid)).data.username is string
           && code(request.resource.data.inviteCode)
           && getAfter(/databases/$(database)/documents/inviteCodes/$(request.resource.data.inviteCode)).data.groupId == gid
-          && getAfter(/databases/$(database)/documents/users/$(uid)/memberships/$(gid)).data.joinedAt == request.time;
+          && getAfter(/databases/$(database)/documents/users/$(uid)/memberships/$(gid)).data.joinedAt == request.time
+          && getAfter(previewPath(request.resource.data.inviteCode,uid)).data.played == 0;
         allow update: if signedIn() && request.auth.uid == uid
-          && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['displayName'])
-          && request.resource.data.displayName == get(/databases/$(database)/documents/users/$(uid)).data.displayName;
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['displayName','avatarId'])
+          && request.resource.data.displayName == get(/databases/$(database)/documents/users/$(uid)).data.displayName
+          && request.resource.data.avatarId == get(/databases/$(database)/documents/users/$(uid)).data.avatarId;
         allow delete: if false;
       }
       match /tickets/{tid} {
@@ -170,7 +194,9 @@ service cloud.firestore {
           && actionBundle(request.resource.data,gid,tid);
         allow update: if member(gid) && participant(resource.data) && ticketShape(request.resource.data,gid)
           && request.resource.data.version == resource.data.version + 1 && transition(resource.data,request.resource.data)
-          && actionBundle(request.resource.data,gid,tid);
+          && actionBundle(request.resource.data,gid,tid)
+          && (request.resource.data.action.kind in ['confirm','respondAmendment']
+            ? (!rankingChanged(resource.data,request.resource.data) || rankingWritten(request.resource.data,gid,tid)) : true);
         allow delete: if false;
         match /events/{eid} {
           allow read: if member(gid);
@@ -214,6 +240,46 @@ service cloud.firestore {
         && getAfter(groupPath(request.resource.data.groupId)).data.inviteCode == inviteCode
         && getAfter(groupPath(request.resource.data.groupId)).data.name == request.resource.data.name;
       allow update, delete: if false;
+      match /players/{uid} {
+        // Knowing a code permits only a bounded, signed-in player preview, never match/profile access.
+        allow get: if signedIn() && exists(/databases/$(database)/documents/inviteCodes/$(inviteCode));
+        allow list: if signedIn() && exists(/databases/$(database)/documents/inviteCodes/$(inviteCode))
+          && request.query.limit != null && request.query.limit <= 20;
+        function shape() {
+          let p = request.resource.data;
+          return p.keys().hasOnly(['displayName','avatarId','xp','played','wins','lastTicketId','lastActionId','updatedAt'])
+            && named(p.displayName,3,24) && validAvatar(p.avatarId) && p.updatedAt == request.time
+            && p.xp is int && p.xp >= 0 && p.played is int && p.played >= 0 && p.wins is int && p.wins >= 0 && p.wins <= p.played;
+        }
+        function ownIdentity() {
+          let own = get(/databases/$(database)/documents/users/$(uid)).data;
+          return request.auth.uid == uid && request.resource.data.displayName == own.displayName
+            && request.resource.data.avatarId == own.avatarId;
+        }
+        function scoreUpdate() {
+          let p = request.resource.data;
+          let gid = get(/databases/$(database)/documents/inviteCodes/$(inviteCode)).data.groupId;
+          let path = /databases/$(database)/documents/groups/$(gid)/tickets/$(p.lastTicketId);
+          let old = get(path).data;
+          let next = getAfter(path).data;
+          return member(gid) && participant(next) && uid in [next.playerA,next.playerB]
+            && uuid(p.lastTicketId) && uuid(p.lastActionId) && next.action.id == p.lastActionId
+            && next.action.actor == request.auth.uid && next.updatedAt == request.time && next.version == old.version + 1
+            && rankingChanged(old,next)
+            && p.diff(resource.data).affectedKeys().hasOnly(['xp','played','wins','lastTicketId','lastActionId','updatedAt'])
+            && p.xp == resource.data.xp + rankXp(next,uid) - rankXp(old,uid)
+            && p.played == resource.data.played + rankPlayed(next) - rankPlayed(old)
+            && p.wins == resource.data.wins + rankWins(next,uid) - rankWins(old,uid);
+        }
+        allow create: if signedIn() && code(inviteCode) && shape() && ownIdentity()
+          && request.resource.data.xp == 0 && request.resource.data.played == 0 && request.resource.data.wins == 0
+          && request.resource.data.lastTicketId == null && request.resource.data.lastActionId == null
+          && getAfter(memberPath(getAfter(/databases/$(database)/documents/inviteCodes/$(inviteCode)).data.groupId,uid)).data.joinedAt == request.time;
+        allow update: if signedIn() && shape() && (request.resource.data.lastActionId != resource.data.lastActionId
+          ? scoreUpdate()
+          : (request.auth.uid == uid && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['displayName','avatarId','updatedAt']) && ownIdentity()));
+        allow delete: if false;
+      }
     }
   }
 }

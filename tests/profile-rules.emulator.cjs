@@ -58,15 +58,52 @@ test('unique usernames are reserved atomically and profiles remain owner-only',a
         method:'PATCH',headers:{Authorization:'Bearer owner','Content-Type':'application/json'},
         body:JSON.stringify({fields:{displayName:{stringValue:'Legacy Name'},createdAt:{timestampValue:created},updatedAt:{timestampValue:created}}})
       });assert.equal(response.ok,true);
-      const chosen=name('legacy');await legacy.call('saveProfile',{displayName:chosen});
+      const chosen=name('legacy');await legacy.call('saveProfile',{displayName:chosen,avatarId:'esfj-connector'});
       const result=(await getDocFromServer(doc(legacy.store,'users',legacy.user.uid))).data();
-      assert.equal(result.createdAt.toDate().toISOString(),created);assert.equal(result.username,chosen);
+      assert.equal(result.createdAt.toDate().toISOString(),created);assert.equal(result.username,chosen);assert.equal(result.avatarId,'esfj-connector');
     });
     await t.test('profile name snapshots in existing groups stay synchronized',async()=>{
       const gid=randomUUID();await alice.call('createGroup',{actionId:gid,name:'Username test'});
       await alice.call('saveProfile',{displayName:chosen.toUpperCase()});
       assert.equal((await getDocFromServer(doc(alice.store,'groups',gid,'members',alice.user.uid))).data().displayName,chosen.toUpperCase());
       await denied(updateDoc(doc(alice.store,'groups',gid,'members',alice.user.uid),{displayName:'Fake'}));
+    });
+    await t.test('characters persist, synchronize to groups and reject forged values',async()=>{
+      const gid=randomUUID();await alice.call('createGroup',{actionId:gid,name:'Character test'});
+      await alice.call('saveProfile',{displayName:chosen,avatarId:'istp-virtuoso'});
+      assert.equal((await getDocFromServer(own)).data().avatarId,'istp-virtuoso');
+      const member=doc(alice.store,'groups',gid,'members',alice.user.uid);
+      assert.equal((await getDocFromServer(member)).data().avatarId,'istp-virtuoso');
+      const inviteCode=(await getDocFromServer(doc(alice.store,'groups',gid))).data().inviteCode;
+      assert.equal((await getDocFromServer(doc(alice.store,'inviteCodes',inviteCode,'players',alice.user.uid))).data().avatarId,'istp-virtuoso');
+      await denied(updateDoc(own,{avatarId:'made-up-character',updatedAt:serverTimestamp()}));
+      await denied(updateDoc(own,{avatarId:42,updatedAt:serverTimestamp()}));
+      await denied(updateDoc(member,{avatarId:'enfj-catalyst'}));
+      await assert.rejects(alice.call('saveProfile',{displayName:chosen,avatarId:'https://example.test/image.png'}),/Choose a character/);
+      await alice.call('saveProfile',{displayName:chosen});
+      assert.equal((await getDocFromServer(own)).data().avatarId,'istp-virtuoso','Saving without an avatar preserves the previous choice');
+      const joined=await legacy.call('joinGroup',{code:(await getDocFromServer(doc(alice.store,'groups',gid))).data().inviteCode});
+      assert.equal(joined.groupId,gid);
+      assert.equal((await getDocFromServer(doc(alice.store,'groups',gid,'members',legacy.user.uid))).data().avatarId,'esfj-connector');
+    });
+    await t.test('retired animal choices upgrade without deleting accounts, reservations or group statistics',async()=>{
+      const gid=randomUUID(),{code}=await legacy.call('createGroup',{actionId:gid,name:'Hero replacement test'});
+      const ownRef=doc(legacy.store,'users',legacy.user.uid),before=(await getDocFromServer(ownRef)).data();
+      const paths=[`users/${legacy.user.uid}`,`groups/${gid}/members/${legacy.user.uid}`,`inviteCodes/${code}/players/${legacy.user.uid}`];
+      for(const path of paths){
+        const preview=path.startsWith('inviteCodes/'),fields={avatarId:{stringValue:'frog'},...(preview?{xp:{integerValue:'76'},played:{integerValue:'1'},wins:{integerValue:'1'}}:{})};
+        const query=new URLSearchParams();for(const field of Object.keys(fields))query.append('updateMask.fieldPaths',field);
+        const response=await fetch(`http://${process.env.FIRESTORE_EMULATOR_HOST}/v1/projects/demo-agree/databases/(default)/documents/${path}?${query}`,{
+          method:'PATCH',headers:{Authorization:'Bearer owner','Content-Type':'application/json'},body:JSON.stringify({fields})
+        });assert.equal(response.ok,true);
+      }
+      await legacy.call('saveProfile',{displayName:before.displayName,avatarId:'estj-captain'});
+      const after=(await getDocFromServer(ownRef)).data();
+      assert.equal(after.username,before.username);assert.deepEqual(after.createdAt,before.createdAt);assert.equal(after.avatarId,'estj-captain');
+      assert.equal((await getDocFromServer(doc(legacy.store,'usernames',before.username))).data().uid,legacy.user.uid);
+      assert.equal((await getDocFromServer(doc(legacy.store,'groups',gid,'members',legacy.user.uid))).data().avatarId,'estj-captain');
+      const preview=(await getDocFromServer(doc(legacy.store,'inviteCodes',code,'players',legacy.user.uid))).data();
+      assert.equal(preview.avatarId,'estj-captain');assert.equal(preview.xp,76);assert.equal(preview.played,1);assert.equal(preview.wins,1);
     });
     await t.test('unauthenticated username claims are denied',async()=>{
       await signOut(bob.auth);

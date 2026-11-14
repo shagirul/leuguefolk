@@ -1,10 +1,22 @@
+import {renderMatchups,matchupStats,matchupGoal} from '/matchups.mjs';
+import {buildAcceptancePlan,queueAcceptancePlan} from '/bulk-accept.mjs';
+import {renderMatchesContent,renderInboxContent,matchNeedsYou,mountMatchSwipes} from '/activity.mjs';
+import {suggestedOpponents,standardGameScore,renderMatchComposer,mountMatchComposer,bindQuickOpponents} from '/record-match.mjs';
+import {replayOutbox} from '/outbox.mjs';
+import {competitionStandings,competitionPoints} from '/domain.mjs';
 import {initializeApp} from 'https://www.gstatic.com/firebasejs/12.19.0/firebase-app.js';
-import {getAuth,GoogleAuthProvider,signInWithPopup,createUserWithEmailAndPassword,signInWithEmailAndPassword,sendPasswordResetEmail,signOut,onAuthStateChanged,updateProfile} from 'https://www.gstatic.com/firebasejs/12.19.0/firebase-auth.js';
-import {getFirestore,doc,collection,onSnapshot,getDoc,getDocs,updateDoc,runTransaction,serverTimestamp,query,orderBy,limit,initializeFirestore,persistentLocalCache,persistentMultipleTabManager} from 'https://www.gstatic.com/firebasejs/12.19.0/firebase-firestore.js';
+import {getAuth,connectAuthEmulator,GoogleAuthProvider,signInWithPopup,createUserWithEmailAndPassword,signInWithEmailAndPassword,sendPasswordResetEmail,signOut,onAuthStateChanged,updateProfile} from 'https://www.gstatic.com/firebasejs/12.19.0/firebase-auth.js';
+import {getFirestore,connectFirestoreEmulator,doc,collection,onSnapshot,getDoc,getDocs,updateDoc,runTransaction,serverTimestamp,increment,query,orderBy,limit,initializeFirestore,persistentLocalCache,persistentMultipleTabManager} from 'https://www.gstatic.com/firebasejs/12.19.0/firebase-firestore.js';
 import {createFirestoreApi} from '/firestore-api.mjs';
+import {renderAccountPage,renderLeagueHeader,renderLeagueNavigation,summarizeProfile,accountAchievements,renderAchievementDetail,accountIcon,createCharacterTooltipController,bindScrollHeader} from '/account.mjs';
+import {renderLeaderboardPage} from '/leaderboard.mjs';
+import {createInviteIntentStore,normalizeInvite,groupInviteUrl,renderGroupTiles,renderInvitePage} from '/invites.mjs';
+import {avatarFor,validAvatar,randomAvatar,playerAvatar,profileAvatar,avatarPicker,updateAvatarPicker,stepAvatarPicker,bindAvatarGestures} from '/avatars.mjs';
 import {getMessaging,getToken,deleteToken,onMessage,isSupported} from 'https://www.gstatic.com/firebasejs/12.19.0/firebase-messaging.js';
 import {enqueue,forUser,patchAction,deleteAction} from '/queue.js';
 const root=document.getElementById('app');
+const scrollHeader=bindScrollHeader(root);
+const characterTooltip=createCharacterTooltipController(document,{setTimer:setTimeout,clearTimer:clearTimeout});
 const settings=self.AGREE_FIREBASE||{};
 const backendEnabled=settings.features?.leaderboards!==false;
 const pushEnabled=false; // No push sender is deployed on the Spark plan.
@@ -12,20 +24,26 @@ const ready=!!settings.firebaseConfig?.apiKey&&!settings.firebaseConfig.apiKey.s
 const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const short=s=>String(s??'').slice(0,100);
 const uid=()=>crypto.randomUUID();
-const state={user:null,profile:null,memberships:[],groupId:null,group:null,members:[],tickets:[],notifications:[],ticketEvents:[],queue:[],online:navigator.onLine,route:parsePath(),period:'weekly',matchTab:'all',dialog:null,draft:{},authMode:'welcome',authEmail:'',authBusy:false,notice:null,loadError:'',authLoading:true,groupLoading:false,showGroupPicker:false,initialized:false};
+function readLocal(key){try{return globalThis.localStorage?.getItem(key)||null;}catch{return null;}}
+function writeLocal(key,value){try{globalThis.localStorage?.setItem(key,value);}catch{}}
+function removeLocal(key){try{globalThis.localStorage?.removeItem(key);}catch{}}
+const inviteIntent=createInviteIntentStore({getItem:readLocal,setItem:writeLocal,removeItem:removeLocal},location);
+const state={user:null,profile:null,memberships:[],groupTiles:{},pendingInvite:inviteIntent.get(),invite:null,inviteLoading:false,inviteBusy:false,inviteError:'',groupId:null,group:null,members:[],tickets:[],notifications:[],ticketEvents:[],queue:[],online:navigator.onLine,route:parsePath(),period:'weekly',matchupTab:'yours',matchTab:'requests',bulkAcceptBusy:false,profileTab:'achievements',dialog:null,draft:{},authMode:'welcome',authEmail:'',avatarId:randomAvatar().id,authBusy:false,notice:null,loadError:'',authLoading:true,groupLoading:false,showGroupPicker:false,initialized:false};
+let closeQuickOpponents=()=>{},bulkAcceptVersion=0;
 const unsub={};let firebaseApp,auth,store,firestoreApi,messaging=null,swReg=null,flushBusy=false,toastTimeout,lastPushSync=0;
 let groupLoadTimer=null,groupListenerVersion=0;
+let inviteLoadVersion=0;
 function when(value){return value?.toDate?value.toDate():(value?new Date(value):null);}
 function dateShort(value){const d=when(value);return d&&!Number.isNaN(+d)?d.toLocaleString('en-IN',{day:'numeric',month:'short',hour:'numeric',minute:'2-digit'}):'Just now';}
-function parsePath(){const p=decodeURI(location.pathname);const match=p.match(/^\/g\/([a-f0-9-]{36})(?:\/(t\/([a-f0-9-]{36})|matches|leaderboard|inbox|profile|new))?\/?$/i);return match?{groupId:match[1],view:match[3]?'ticket':match[2]||'leaderboard',ticketId:match[3]}:{groupId:null,view:'leaderboard'};}
+function parsePath(){const p=String(location.pathname||'');const match=p.match(/^\/g\/([a-f0-9-]{36})(?:\/(t\/([a-f0-9-]{36})|matchups(?:\/([^/]+))?|players\/([^/]+)|matches|leaderboard|inbox|profile|new))?\/?$/i);if(!match)return {groupId:null,view:'leaderboard'};let playerId,opponentId;try{playerId=match[5]?decodeURIComponent(match[5]):null;}catch{}try{opponentId=match[4]?decodeURIComponent(match[4]):null;}catch{}return {groupId:match[1],view:match[2]?.startsWith('players/')?'player':match[3]?'ticket':match[2]?.startsWith('matchups')?'matchups':match[2]||'leaderboard',ticketId:match[3],opponentId,playerId};}
 function periodKeys(date){const parts=Object.fromEntries(new Intl.DateTimeFormat('en-CA',{timeZone:'Asia/Kolkata',year:'numeric',month:'2-digit',day:'2-digit'}).formatToParts(date).filter(x=>x.type!=='literal').map(x=>[x.type,x.value]));const t=new Date(Date.UTC(+parts.year,+parts.month-1,+parts.day));t.setUTCDate(t.getUTCDate()-(t.getUTCDay()+6)%7);return {weekKey:t.toISOString().slice(0,10),monthKey:`${parts.year}-${parts.month}`};}
 const userName=userId=>state.members.find(m=>m.id===userId)?.displayName||((state.user?.uid===userId)?(state.profile?.displayName||'You'):'Player');
+const userAvatar=userId=>userId===state.user?.uid?state.profile?.avatarId:state.members.find(m=>m.id===userId)?.avatarId;
 const other=t=>t.playerA===state.user?.uid?t.playerB:t.playerA;
 const myGroup=()=>state.memberships.some(g=>g.groupId===state.groupId);
-function navigate(path){history.pushState({},'',path);state.showGroupPicker=false;state.route=parsePath();state.dialog=null;state.draft={};ensureRoute();render();window.scrollTo({top:0,behavior:'instant'});}
+function navigate(path,replace=false){scrollHeader.reset();closeQuickOpponents();characterTooltip.hide({immediate:true});if(replace)history.replaceState({},'',inviteIntent.path(path));else history.pushState({},'',inviteIntent.path(path));state.showGroupPicker=false;state.route=parsePath();state.dialog=null;state.draft={};ensureRoute();render();root.scrollTo?.({top:0,behavior:'instant'});window.scrollTo({top:0,behavior:'instant'});}
 function go(view){navigate(`/g/${state.groupId}/${view}`);}
 function badge(text,tone='purple'){return `<span class="badge ${tone}">${esc(text)}</span>`;}
-function xp(score){return Number(score||0)*2;}
 function toast(text,path=null,duration=5000){const t=document.getElementById('toast');t.textContent=path?text+' · Tap to open':text;t.onclick=path&&/^\/g\/[a-f\d-]{36}\//i.test(path)?()=>navigate(path):null;t.style.cursor=t.onclick?'pointer':'default';t.classList.add('show');clearTimeout(toastTimeout);toastTimeout=setTimeout(()=>t.classList.remove('show'),duration);}
 function errText(e){const v=String(e?.message||e||'Unexpected error').replace(/^Firebase:\s*/, '').replace(/\s*\(functions\/[\w-]+\)\.?/g,'').replace(/\s*\(auth\/[\w-]+\)\.?/g,'');return v.slice(0,240);}
 function authErrorText(error){
@@ -55,57 +73,33 @@ function stopGroupListeners(){
   ['group','members','tickets','events'].forEach(k=>{unsub[k]?.();delete unsub[k];});state.group=null;state.members=[];state.tickets=[];state.ticketEvents=[];
 }
 function groupPath(view='leaderboard'){return `/g/${state.groupId}/${view}`;}
-function shell(title,content,active='leaderboard',back=false,side=''){
+function shell(title,content,active='leaderboard',back=false){
   const unread=state.notifications.some(n=>!n.readAt);
   const queueCount=state.queue.filter(q=>q.status==='queued').length,blocked=state.queue.filter(q=>q.status==='blocked').length;
-  return `<div class="shell">
-    <header class="top">${back?`<button class="top-back" data-action="back" aria-label="Back">‹</button>`:`<div class="brand-icon">A</div>`}
-      <div class="grow"><h1>${esc(title)}</h1><div class="subtitle">${esc(state.group?.name||'Invite-only leaderboard')}</div></div>
-      ${side||`<button class="top-action" data-action="groupSwitch" aria-label="Switch groups">Groups ⌄</button>`}</header>
+  return `<div class="account-page activity-page">
+    ${renderLeagueHeader({title,group:state.group,back,unread,inboxActive:active==='inbox'})}
     ${!state.online?`<div class="offline-strip">Offline · Matches are saved locally and sent when you reopen online</div>`:''}
-    ${(queueCount||blocked)?`<div class="queue-strip"><span>↗ ${queueCount} waiting to send${blocked?` · ${blocked} needs review`:''}</span><button data-action="outbox">View outbox</button></div>`:''}
-    <main class="content">${content}</main>
-    <nav class="bottom-nav" aria-label="Main navigation">
-      ${[['leaderboard','🏆','Ranks'],['matches','⚔','Matches'],['inbox','🔔','Inbox'],['profile','◉','Profile']].map(([v,i,l])=>`<button class="nav-btn ${active===v?'active':''}" data-action="nav" data-view="${v}" aria-label="${l}"><span class="nav-ico">${i}</span><span>${l}</span>${v==='inbox'&&unread?'<i class="nav-dot"></i>':''}</button>`).join('')}
-    </nav></div>${state.dialog?modal():''}`;
+    ${(queueCount||blocked)?`<div class="queue-strip"><span>↗ ${queueCount} queued — waiting for connection${blocked?` · ${blocked} needs review`:''}</span><button data-action="outbox">View outbox</button></div>`:''}
+    <main class="account-body activity-body">${content}</main>
+    ${renderLeagueNavigation(active)}</div>${state.dialog?modal():''}`;
 }
-function statFor(period){const ids=state.members.map(m=>m.id),now=periodKeys(new Date());const key=period==='weekly'?'weekKey':'monthKey';const scores=Object.fromEntries(ids.map(id=>[id,{id,score:0,played:0,wins:0}]));
-  for(const t of state.tickets){const created=when(t.createdAt);if(t.status!=='finalized'||!t.finalScore||!created||periodKeys(created)[key]!==now[key])continue;
-    const a=scores[t.playerA],b=scores[t.playerB];if(!a||!b)continue;
-    a.score+=xp(t.finalScore.a);b.score+=xp(t.finalScore.b);a.played++;b.played++;if(t.finalScore.a>t.finalScore.b)a.wins++;if(t.finalScore.b>t.finalScore.a)b.wins++;
-  }
-  return Object.values(scores).sort((a,b)=>b.score-a.score||b.wins-a.wins||userName(a.id).localeCompare(userName(b.id)));
-}
-function rankContent(){const scores=statFor(state.period);const own=scores.findIndex(x=>x.id===state.user?.uid);
-  return `<div class="feature-card"><div class="row between"><div><div class="small quiet">Your ${state.period} position</div><div style="font-size:36px;font-weight:900;margin:6px 0 3px">#${own+1} <span style="font-size:15px;color:var(--purple)">🏆</span></div><div class="small quiet">${scores[own]?.score||0} XP from agreed matches</div></div><div class="avatar" style="height:65px;width:65px;font-size:30px">⚡</div></div></div>
-    <div class="tabs"><button class="tab ${state.period==='weekly'?'active':''}" data-action="period" data-value="weekly">This week</button><button class="tab ${state.period==='monthly'?'active':''}" data-action="period" data-value="monthly">This month</button></div>
-    <div class="section-heading"><h2>Leaderboard</h2><small>${state.members.length} players</small></div>
-    <div class="card">${scores.map((p,i)=>`<div class="row member ${p.id===state.user.uid?'member-you':''}"><div class="rank">${i<3?['🥇','🥈','🥉'][i]:i+1}</div><div class="avatar ${i===0?'gold':i===1?'silver':i===2?'bronze':''}">${esc(userName(p.id).charAt(0).toUpperCase())}</div><div class="grow"><div class="member-name">${esc(userName(p.id))}${p.id===state.user.uid?' <span class="quiet small">(you)</span>':''}</div><div class="tiny quiet">${p.played} verified matches</div></div><div class="member-score">${p.score} <span class="tiny quiet">XP</span></div></div>`).join('')||'<div class="quiet">No members yet</div>'}</div>
-    ${button('+ Record a match','newMatch')}
-    <div class="footer-info">Only verified results count. Every match awards each player twice their own score as XP. Weekly and monthly seasons use the match submission date in Asia/Kolkata; later confirmation can update a previous period.</div>`;
-}
-function status(t){if(t.status==='cancelled')return badge('Cancelled','red');if(t.status==='finalized')return t.amendment?badge('Change pending','amber'):badge('Verified','green');if(t.cancellation)return badge('Cancel requested','amber');if(t.disputed)return badge('Disputed','red');if(t.revision>1)return badge('Negotiating','purple');return badge('Awaiting review','amber');}
-function ticketsContent(){let arr=state.tickets.slice().sort((a,b)=>(when(b.createdAt)||0)-(when(a.createdAt)||0));if(state.matchTab==='action')arr=arr.filter(t=>needsMe(t));if(state.matchTab==='verified')arr=arr.filter(t=>t.status==='finalized');
-  const counts=state.tickets.filter(needsMe).length;
-  return `<div class="section-heading" style="margin-top:0"><h2>Your matches</h2><span class="pill">${state.tickets.length} total</span></div>
-    ${button('+ Record a match','newMatch')}
-    <div class="spacer"></div><div class="tabs"><button class="tab ${state.matchTab==='all'?'active':''}" data-action="matchTab" data-value="all">All</button><button class="tab ${state.matchTab==='action'?'active':''}" data-action="matchTab" data-value="action">Your turn (${counts})</button><button class="tab ${state.matchTab==='verified'?'active':''}" data-action="matchTab" data-value="verified">Verified</button></div>
-    <div class="section-heading"><h2>${state.matchTab==='action'?'Waiting on you':'Match history'}</h2></div>
-    ${arr.length?arr.map(t=>`<button class="ticket-row" data-action="openTicket" data-id="${esc(t.id)}"><div class="row between"><div class="row grow"><div class="avatar">${esc(userName(other(t)).charAt(0))}</div><div class="grow"><div class="member-name line-clamp">vs ${esc(userName(other(t)))}</div><div class="ticket-sub">${dateShort(t.createdAt)}</div></div></div>${status(t)}</div><div class="row between" style="margin-top:12px"><div class="ticket-score">${t.finalScore?`${t.finalScore.a} – ${t.finalScore.b}`:`${t.proposal.score.a} – ${t.proposal.score.b}`}</div><span class="small" style="color:${needsMe(t)?'var(--purple)':'var(--muted)'}">${needsMe(t)?'Respond now →':t.status==='open'?'View request →':'Details →'}</span></div></button>`).join(''):`<div class="center-empty"><div class="empty-icon">⚔</div><strong>No matches here</strong><span class="quiet small">${state.matchTab==='action'?'You are all caught up.':'Record a score to get started.'}</span></div>`}`;
-}
-function needsMe(t){const me=state.user?.uid;if(t.status==='open')return t.cancellation?t.cancellation.turn===me:t.turn===me;if(t.status==='finalized'&&t.amendment)return t.amendment.turn===me;return false;}
-function scoreView(t,score){return `<div class="score-panel"><div class="score-side"><div class="score-number">${esc(score?.a??'—')}</div><div class="score-label">${esc(userName(t.playerA))}</div></div><div class="score-divider">–</div><div class="score-side"><div class="score-number">${esc(score?.b??'—')}</div><div class="score-label">${esc(userName(t.playerB))}</div></div></div>`;}
+function statFor(period){return competitionStandings(state.members,state.tickets,period);}
+function leaderboardScreen(){return renderLeaderboardPage({scores:statFor(state.period),members:state.members,user:state.user,profile:state.profile,group:state.group,period:state.period,online:state.online,queue:state.queue,unread:state.notifications.some(n=>!n.readAt),dialog:state.dialog?modal():''});}
+function status(t){if(t.status==='cancelled')return badge('Cancelled','red');if(t.status==='finalized')return t.amendment?badge('Change pending','amber'):badge('Verified','green');if(t.cancellation)return badge('Cancel requested','amber');if(t.disputed)return badge('Disputed','red');if(t.revision>1)return badge('Correction proposed','purple');return badge('Awaiting review','amber');}
+function ticketsContent(){return renderMatchesContent({tickets:state.tickets,members:state.members,profile:state.profile,user:state.user,queue:state.queue,tab:state.matchTab,bulkBusy:state.bulkAcceptBusy});}
+function needsMe(t){return matchNeedsYou(t,state.user?.uid);}
+function scoreView(t,score){return `<div class="score-panel activity-score-panel"><div class="score-side"><span class="activity-score-avatar">${profileAvatar(t.playerA,userAvatar(t.playerA),userName(t.playerA))}</span><div class="score-number">${esc(score?.a??'—')}</div><div class="score-label">${esc(userName(t.playerA))}</div></div><div class="score-divider">–</div><div class="score-side"><span class="activity-score-avatar">${profileAvatar(t.playerB,userAvatar(t.playerB),userName(t.playerB))}</span><div class="score-number">${esc(score?.b??'—')}</div><div class="score-label">${esc(userName(t.playerB))}</div></div></div>`;}
 function ticketContent(t){if(!t)return `${note('error','This match is not available. You may be offline without a cached copy, or the link may be incorrect.')}${button('Back to matches','matches','secondary')}`;
   const waiting=t.cancellation?.turn||t.amendment?.turn||t.turn;const myTurn=waiting===state.user.uid;
   const name=userName(other(t));
   const score=t.finalScore||t.proposal?.score;
   const pendingLocal=state.queue.find(q=>q.payload?.ticketId===t.id&&q.status!=='blocked');
-  let body=`<div class="row between"><div class="small quiet">Match with <strong>${esc(name)}</strong></div>${status(t)}</div><div class="card" style="margin-top:13px">${scoreView(t,score)}<div class="small quiet text-center">${t.status==='finalized'?'Both agreed • Official result':t.status==='cancelled'?'Match cancelled':`Last proposed by ${esc(userName(t.proposal.by))}`}</div></div>`;
+  let body=`<div class="activity-ticket-meta"><span>${dateShort(t.createdAt)}</span>${status(t)}</div><div class="match-review-card">${scoreView(t,score)}<div class="small quiet text-center">${t.status==='finalized'?'Both agreed • Official result':t.status==='cancelled'?'Match cancelled':`Last proposed by ${esc(userName(t.proposal.by))}`}</div></div>`;
   if(pendingLocal)body+=note('warn','Your last action is queued on this device. Its result will appear after the server confirms it. You cannot submit another response until then.');
   if(t.status==='open'&&!pendingLocal){
     if(t.cancellation){body+=note('warn',`${esc(userName(t.cancellation.by))} requested to cancel this match.${t.cancellation.note?' Reason: '+esc(t.cancellation.note):''}`);
       body+=myTurn?`${button('Agree to cancel','acceptCancel')}${button('Keep this match open','declineCancel','outline')}`:note('','Waiting for the other player to respond to cancellation.');
-    }else if(myTurn){body+=note('','Check both scores carefully. Approving makes them official and adds XP to the leaderboard.');
+    }else if(myTurn){body+=note('','Check both scores carefully. Approving makes this result official. A win earns 3 league points.');
       body+=`${button('✓ Confirm this score','confirm')}${button('Suggest a different score','suggest','secondary')}${button('Disagree / discuss','dispute','outline')}`;
     }else{body+=note('warn',`Waiting for <strong>${esc(userName(t.turn))}</strong> to review this score. They can confirm or propose a correction.`);
       if(t.playerA===state.user.uid&&t.revision===1)body+=button('Edit my original submission','editOriginal','secondary');
@@ -116,44 +110,49 @@ function ticketContent(t){if(!t)return `${note('error','This match is not availa
     }
   }
   if(t.status==='finalized'){
-    body+=`<div class="soft-card"><div class="row between"><span class="member-name">⚡ XP awarded</span>${badge('Verified','green')}</div><div class="stat-row" style="margin-top:12px"><div class="stat"><big>+${xp(t.finalScore.a)}</big><small>${esc(userName(t.playerA))}</small></div><div class="stat"><big>+${xp(t.finalScore.b)}</big><small>${esc(userName(t.playerB))}</small></div></div></div>`;
+    body+=`<div class="soft-card"><div class="row between"><span class="member-name">League points</span>${badge('Verified','green')}</div><div class="stat-row" style="margin-top:12px"><div class="stat"><big>+${competitionPoints(t,t.playerA)}</big><small>${esc(userName(t.playerA))}</small></div><div class="stat"><big>+${competitionPoints(t,t.playerB)}</big><small>${esc(userName(t.playerB))}</small></div></div></div>`;
+    if([t.playerA,t.playerB].includes(state.user.uid)){
+      const matchup=matchupStats(state.tickets,state.user.uid,other(t),state.groupId);
+      const milestone=matchup.history.find(m=>m.result==='W')?.id===t.id?'First verified win against '+name:matchup.last?.id===t.id&&matchup.streak>=2?matchup.streak+' consecutive '+(matchup.streakResult==='W'?'wins':'losses')+' in this matchup':'';
+      body+=`<div class="matchup-ticket-update"><span>Lifetime head-to-head</span><strong>${matchup.wins}–${matchup.losses} vs ${esc(name)}</strong>${milestone?`<small>${esc(milestone)}</small>`:''}<button data-action="openMatchup" data-id="${esc(other(t))}">View matchup →</button></div>`;
+    }
     if(t.amendment){body+=note('warn',`${esc(userName(t.amendment.by))} requested ${t.amendment.kind==='void'?'to void this verified match':'a score correction'}. The original result continues to count until you both agree.`);
       if(t.amendment.kind==='score')body+=`<div class="soft-card"><div class="small quiet">Proposed replacement</div>${scoreView(t,t.amendment.score)}${t.amendment.note?`<div class="small quiet">“${esc(t.amendment.note)}”</div>`:''}</div>`;
       if(myTurn&&!pendingLocal)body+=`${button(t.amendment.kind==='void'?'Agree to void match':'Accept new verified score','acceptAmendment')}${t.amendment.kind==='score'?button('Counter with another score','counterAmendment','secondary'):''}${button('Decline change (keep original)','declineAmendment','outline')}`;
       else if(!pendingLocal)body+=note('','Waiting for the other player to review the proposed change.');
     }else if(!pendingLocal)body+=`${button('Propose a verified score change','amend','secondary')}${button('Request mutual void','voidMatch','ghost')}`;
   }
-  if(t.status==='cancelled')body+=note('good','Cancelled by mutual agreement. No XP is counted for this match.');
+  if(t.status==='cancelled')body+=note('good','Cancelled by mutual agreement. No league points are counted for this match.');
   body+=`<div class="section-heading"><h2>Activity</h2><small>Permanent record</small></div><div class="timeline">${state.ticketEvents.length?state.ticketEvents.map(e=>`<div class="timeline-item"><strong>${esc(eventTitle(e.kind))}</strong><div class="muted">${esc(userName(e.actor))} · ${dateShort(e.at)}</div>${e.score?`<div class="small" style="margin-top:5px;font-weight:750">${e.score.a} – ${e.score.b}</div>`:''}${e.note?`<div class="small quiet" style="margin-top:5px">“${esc(e.note)}”</div>`:''}</div>`).join(''):`<div class="quiet small">Activity loads when online or previously cached.</div>`}</div>`;
   return body;
 }
 function eventTitle(s){return ({submitted:'Score submitted',withdrawOriginal:'Submission withdrawn',confirm:'Score verified',propose:'New score proposed',editOriginal:'Original score edited',requestCancel:'Cancellation requested',respondCancel:'Cancellation answered',startAmendment:'Verified result change requested',counterAmendment:'Counter-proposal sent',respondAmendment:'Change request answered'})[s]||s;}
-function newMatchContent(){const opponents=state.members.filter(m=>m.id!==state.user.uid);
-  return `<div class="section-heading" style="margin-top:0"><h2>Record a match</h2></div><p class="small quiet" style="line-height:1.6">One player reports. The other confirms. XP is added only after agreement.</p>
-    ${opponents.length?`<form id="newMatchForm"><div class="field"><label for="opponent">Who did you play?</label><select id="opponent" class="input select" name="opponentUid" required>${opponents.map((m,i)=>`<option value="${esc(m.id)}" ${state.draft.opponentUid?state.draft.opponentUid===m.id?'selected':'':i===0?'selected':''}>${esc(m.displayName)}</option>`).join('')}</select></div>
-    <div class="soft-card"><div class="section-heading" style="margin-top:0"><h2>Enter match scores</h2></div><div class="score-panel"><div class="score-side"><input aria-label="Your score" class="input score-input" type="number" min="0" max="200" step="1" inputmode="numeric" name="scoreSelf" value="${esc(state.draft.scoreSelf??'21')}" required/><div class="score-label">You</div></div><div class="score-divider">–</div><div class="score-side"><input aria-label="Opponent score" class="input score-input" type="number" min="0" max="200" step="1" inputmode="numeric" name="scoreOpponent" value="${esc(state.draft.scoreOpponent??'17')}" required/><div class="score-label">Opponent</div></div></div></div>
-    <div class="field"><label for="match-note">Note (optional)</label><textarea id="match-note" class="input" rows="2" name="note" maxlength="280" placeholder="Anything to clarify?">${esc(state.draft.note||'')}</textarea></div>
-    <button type="submit" class="btn">Send score for confirmation</button>
-    ${note('',state.online?'The other player will see the request in their in-app inbox.':'Offline: your request will be saved on this device and sent when you reopen online.')}
-    </form>`:note('warn','Invite another player first to record a match.')}`;
+function opponentFavorites(){try{const saved=JSON.parse(readLocal('leaguefolk-favorites:'+state.user?.uid+':'+state.groupId)||'[]');return Array.isArray(saved)?saved.filter(id=>typeof id==='string'):[];}catch{return [];}}
+function recordOpponents(){return suggestedOpponents(state.members,state.tickets,state.user?.uid,{favorites:opponentFavorites()});}
+function openRecordMatch(id){const opponent=state.members.find(m=>m.id===id&&m.id!==state.user?.uid);go('new');if(opponent){state.draft.opponentUid=opponent.id;render();}}
+function newMatchContent(){return renderMatchComposer({opponents:recordOpponents(),profile:state.profile,draft:state.draft,online:state.online});}
+function matchupSeen(){try{const data=JSON.parse(readLocal('leaguefolk-matchups:'+state.user?.uid+':'+state.groupId)||'{}');return data&&typeof data==='object'?data:{};}catch{return {};}}
+function matchupContent(){
+ const seen=matchupSeen(),id=state.route.opponentId;
+ const html=renderMatchups({members:state.members,tickets:state.tickets,user:state.user,profile:state.profile,group:state.group,tab:state.matchupTab,opponentId:id,seen});
+ if(id&&id!==state.user.uid){seen[id]=matchupStats(state.tickets,state.user.uid,id,state.groupId).fingerprint;writeLocal('leaguefolk-matchups:'+state.user.uid+':'+state.groupId,JSON.stringify(seen));}
+ return html;
 }
-function inboxContent(){const all=state.notifications;
-  return `<div class="section-heading" style="margin-top:0"><h2>Activity inbox</h2><span class="pill">${all.filter(x=>!x.readAt).length} unread</span></div>${all.length?all.map(n=>`<button class="ticket-row" data-action="openNotification" data-id="${esc(n.id)}"><div class="row between"><span class="member-name">${esc(n.title)}</span>${!n.readAt?'<span class="pill">New</span>':''}</div><div class="small quiet" style="margin-top:8px;line-height:1.5">${esc(n.body)}</div><div class="tiny quiet" style="margin-top:9px">${dateShort(n.createdAt)} · Open match →</div></button>`).join(''):`<div class="center-empty"><div class="empty-icon">🔔</div><strong>No notifications yet</strong><span class="small quiet">Match requests and future activity will appear here.</span></div>`}`;
-}
-function profileContent(){const g=state.group;
-  return `<div class="card"><div class="row"><div class="avatar" style="width:55px;height:55px;font-size:23px">${esc((state.profile?.displayName||'A').charAt(0))}</div><div><div class="member-name">${esc(state.profile?.displayName||'Player')}</div><div class="quiet small">${esc(state.user?.email||'')}</div></div></div></div>
-    <div class="section-heading"><h2>Invite your friends</h2></div><div class="soft-card"><div class="small quiet" style="margin-bottom:10px">Anyone with this code can join your group. There is no admin.</div><div class="copy-code"><span>${esc(g?.inviteCode||'')}</span><button class="link-btn" data-action="copyInvite">Copy</button></div><div class="spacer"></div>${button('Share invitation','shareInvite','secondary')}</div>
-    <div class="section-heading"><h2>Your groups</h2></div><div class="card"><div class="row between"><div><div class="member-name">${esc(g?.name||'')}</div><div class="small quiet">${state.members.length} members · Asia/Kolkata seasons</div></div>${badge('Joined','green')}</div></div>
-    ${button('Switch / create another group','groupSwitch','secondary')}${button('Sign out','logout','ghost')}
-    <p class="footer-info">No central admin. Both players must agree on the score or a cancellation. Verified results cannot be changed by one person alone.</p>`;
-}
+function inboxContent(){return renderInboxContent({notifications:state.notifications,tickets:state.tickets,members:state.members,profile:state.profile,user:state.user,group:state.group,groups:state.memberships});}
 function scoreFields(t,mode){const base=mode==='amend'||mode==='counterAmendment'?t.amendment?.score||t.finalScore:t.proposal.score;
   return `<div class="soft-card"><div class="score-panel"><div class="score-side"><input type="number" name="scoreA" min="0" max="200" step="1" required class="input score-input" value="${esc(state.draft.scoreA??base?.a??0)}" aria-label="Score for ${esc(userName(t.playerA))}"/><div class="score-label">${esc(userName(t.playerA))}</div></div><div class="score-divider">–</div><div class="score-side"><input type="number" name="scoreB" min="0" max="200" step="1" required class="input score-input" value="${esc(state.draft.scoreB??base?.b??0)}" aria-label="Score for ${esc(userName(t.playerB))}"/><div class="score-label">${esc(userName(t.playerB))}</div></div></div></div>`;
 }
 function modal(){const d=state.dialog||{},t=state.tickets.find(t=>t.id===d.ticketId),kind=d.kind;
   const close=`<button type="button" class="btn ghost" data-action="closeDialog">Close</button>`;
   let inner='';
-  if(kind==='groupSwitch')inner=`<h2>Your groups</h2><p>Choose a leaderboard or join another.</p>${state.memberships.map(g=>`<button class="group-item" data-action="switchGroup" data-id="${esc(g.groupId)}"><strong>${esc(g.name)}</strong><span>→</span></button>`).join('')}${button('+ Create a group','openCreateGroup','secondary')}${button('Join with invite code','openJoinGroup','outline')}${close}`;
+  if(kind==='groupSwitch')inner=`<h2>Your groups</h2>${renderGroupTiles(state.memberships,state.groupTiles,state.groupId)}${button('+ Create a group','openCreateGroup','secondary')}${button('Join with invite code','openJoinGroup','outline')}${close}`;
+  if(kind==='accountSettings')inner=`<h2>Account settings</h2><p class="account-settings-meta">${esc(state.profile.displayName)}<br>${esc(state.user.email)}</p>${button('Change character','editProfile','secondary')}${backendEnabled?button('Switch group','groupSwitch','outline'):''}${button('Sign out','logout','ghost')}${close}`;
+  if(kind==='accountInvite')inner=`<h2>Invite your friends</h2><p>Join ${esc(state.group?.name||'your group')} with this code.</p><div class="copy-code"><span>${esc(state.group?.inviteCode||'')}</span><button class="link-btn" data-action="copyInvite">Copy</button></div>${button('Share invitation','shareInvite','secondary')}${button('Switch group','groupSwitch','outline')}${close}`;
+  if(kind==='accountAchievement'){
+    const achievement=currentAchievements().find(a=>a.id===d.achievementId);
+    if(achievement)inner=renderAchievementDetail(achievement,{members:state.members,group:state.group,playerName:state.route.view==='player'?userName(state.route.playerId):null});
+  }
+  if(kind==='editProfile')inner=`<form id="profileForm" class="account-character-editor"><h2>Choose your character</h2><input type="hidden" name="displayName" value="${esc(state.profile.displayName)}"/>${avatarPicker(state.avatarId)}<button class="btn" type="submit">Save</button></form>${close}`;
   if(kind==='createGroup')inner=`<h2>Create a group</h2><p>Everyone has equal rights. The first player only creates the invitation code.</p><form id="createGroupForm"><div class="field"><label>Group name</label><input class="input" name="name" maxlength="52" minlength="2" required placeholder="Friday Badminton"/></div><button class="btn" type="submit">Create group</button></form>${close}`;
   if(kind==='joinGroup')inner=`<h2>Join a leaderboard</h2><p>Ask a group member for their invitation code.</p><form id="joinGroupForm"><div class="field"><label>Invite code</label><input class="input" name="code" minlength="8" maxlength="8" autocapitalize="characters" required placeholder="ABCD23EF"/></div><button class="btn" type="submit">Join group</button></form>${close}`;
   if(kind==='outbox')inner=`<h2>Offline outbox</h2><p>Actions wait safely on this device. They only affect real scores after the server accepts them.</p>${state.queue.length?state.queue.map(q=>`<div class="soft-card"><div class="row between"><strong class="small">${esc(q.kind==='submitMatch'?'New match':eventTitle(q.payload?.kind||q.kind))}</strong>${badge(q.status==='blocked'?'Needs review':q.status==='queued'?'Queued':'Sending',q.status==='blocked'?'red':'amber')}</div><div class="small quiet" style="margin:8px 0">${q.status==='blocked'?esc(q.error||'Review current match state.'):q.status==='queued'?'Will send when this app reconnects.':'Sending…'}</div><div class="button-grid">${q.payload?.ticketId?button('Open match','outboxMatch','secondary',`data-id="${esc(q.payload.ticketId)}"`):'<span></span>'}${button('Discard','discardJob','outline',`data-id="${esc(q.id)}"`)}</div></div>`).join(''):`${note('good','Your outbox is empty.')}`}${button('Try sending now','flushNow','secondary')}${close}`;
@@ -165,29 +164,65 @@ function modal(){const d=state.dialog||{},t=state.tickets.find(t=>t.id===d.ticke
       <button class="btn" type="submit">${kind==='editOriginal'?'Save and notify opponent':kind==='amend'?'Request both-player approval':'Send score proposal'}</button></form>${close}`;
   }
   if(['requestCancel','voidMatch'].includes(kind)&&t){inner=`<h2>${kind==='voidMatch'?'Request to void verified match':'Request to cancel match'}</h2><p>This does not delete a result immediately. The other player must agree. If they decline, the current state stays in place.</p><form id="cancelForm"><div class="field"><label>Reason (optional)</label><textarea name="note" class="input" rows="2" maxlength="280" placeholder="Why cancel?">${esc(state.draft.note||'')}</textarea></div><button class="btn danger" type="submit">Send mutual cancellation request</button></form>${close}`;}
-  if(kind==='confirmAction'&&t){inner=`<h2>Confirm this match?</h2><p>Both players will receive XP. This result becomes official immediately.</p>${scoreView(t,t.proposal.score)}${button('Confirm exact score','commitConfirm')}${close}`;}
+  if(kind==='acceptAll'){
+    const plan=d.plan;
+    inner=`<h2>Accept ${plan.items.length} scores?</h2><p>Confirm these exact scores. Changed requests will stay for review.${state.online?'':' Confirmations will queue until you reconnect.'}</p><ul class="bulk-score-review">${plan.items.map(item=>{const opponent=item.playerA===plan.uid?item.playerB:item.playerA,own=item.playerA===plan.uid?item.score.a:item.score.b,otherScore=item.playerA===plan.uid?item.score.b:item.score.a;return `<li>${playerAvatar(userAvatar(opponent))}<span><strong>${esc(userName(opponent))}</strong><small>You · Opponent</small></span><b>${own}<i>–</i>${otherScore}</b></li>`;}).join('')}</ul>${state.tickets.filter(needsMe).length>plan.items.length?'<p class="bulk-review-note">Cancellations, disputes and verified-score changes are reviewed individually.</p>':''}${button(state.bulkAcceptBusy?'Accepting…':'Accept '+plan.items.length+' scores','commitAcceptAll','',state.bulkAcceptBusy?'disabled':'')}${button('Cancel','closeDialog','ghost',state.bulkAcceptBusy?'disabled':'')}`;
+  }
+  if(kind==='confirmAction'&&t){inner=`<h2>Confirm this match?</h2><p>A verified win earns 3 points. ${state.online?"This score counts after the server confirms it.":"Your confirmation will be queued until you reconnect."}</p>${scoreView(t,t.proposal.score)}${button('Confirm exact score','commitConfirm')}${close}`;}
   if(kind==='enablePush')inner=`<h2>Turn on notifications</h2><p>Only enable if you want match requests and upcoming group updates delivered to this device. Tapping any match notification opens its exact match.</p>${button('Enable notifications','commitPush')}${close}`;
-  return `<div class="modal-backdrop" data-action="backdrop"><section class="modal" role="dialog" aria-modal="true" aria-label="${esc(kind)}"><div class="modal-handle"></div>${inner}</section></div>`;
+  return `<div class="modal-backdrop" data-action="backdrop"><section class="modal league-dialog ${['accountSettings','accountInvite','accountAchievement','editProfile','groupSwitch'].includes(kind)?'account-dialog':''}" role="dialog" aria-modal="true" aria-label="${esc(({acceptAll:'Accept scores',accountSettings:'Account settings',accountInvite:'Invite friends',accountAchievement:'Achievement details',editProfile:'Change character',groupSwitch:'Choose a group'})[kind]||kind)}"><button type="button" class="modal-handle" data-action="closeDialog" aria-label="Close drawer; drag down to dismiss" ${state.bulkAcceptBusy?'disabled':''}><span></span></button>${inner}</section></div>`;
+}
+function bindDrawerGestures(target,onDismiss){
+  let drag=null,suppressClick=false;
+  const reset=()=>{if(!drag)return;drag.sheet.classList.remove('is-dragging');drag.sheet.style.removeProperty('--drawer-y');drag=null;};
+  target.addEventListener('pointerdown',e=>{
+    const handle=e.target.closest?.('.modal-handle');if(!handle||handle.disabled||e.button!==0)return;
+    const sheet=handle.closest('.modal');if(!sheet)return;
+    suppressClick=false;drag={sheet,handle,id:e.pointerId,y:e.clientY,lastY:e.clientY,time:e.timeStamp,lastTime:e.timeStamp,velocity:0,distance:0};
+    handle.setPointerCapture?.(e.pointerId);sheet.classList.add('is-dragging');
+  });
+  target.addEventListener('pointermove',e=>{
+    if(!drag||drag.id!==e.pointerId)return;
+    if(!drag.sheet.isConnected){reset();return;}
+    const dt=e.timeStamp-drag.lastTime;if(dt>0)drag.velocity=(e.clientY-drag.lastY)/dt;
+    drag.lastY=e.clientY;drag.lastTime=e.timeStamp;drag.distance=Math.max(0,e.clientY-drag.y);
+    drag.sheet.style.setProperty('--drawer-y',drag.distance+'px');if(drag.distance>3)e.preventDefault();
+  },{passive:false});
+  target.addEventListener('pointerup',e=>{
+    if(!drag||drag.id!==e.pointerId)return;
+    const {sheet,distance,velocity,lastTime}=drag,threshold=Math.min(120,Math.max(64,sheet.getBoundingClientRect().height*.22));
+    suppressClick=distance>5;reset();
+    if(distance>=threshold||(distance>24&&velocity>.65&&e.timeStamp-lastTime<100)){
+      sheet.classList.add('is-closing');setTimeout(()=>{if(sheet.isConnected)onDismiss(sheet);},180);
+    }
+  });
+  target.addEventListener('pointercancel',()=>{suppressClick=!!drag&&drag.distance>5;reset();});
+  target.addEventListener('lostpointercapture',()=>{if(drag)reset();});
+  target.addEventListener('click',e=>{if(suppressClick){suppressClick=false;if(e.target.closest?.('.modal-handle')){e.preventDefault();e.stopImmediatePropagation();}}},true);
 }
 function render(){
-  if(!ready){root.innerHTML=`<div class="auth-wrap"><div class="auth-card"><div class="logo-mark">A</div><h1>Connect your Firebase app</h1><p>This PWA is intentionally not connected to anyone else's project.</p>${note('warn','Edit <strong>public/firebase-config.js</strong> and add your web app config and public VAPID key. Follow README.md to enable Firebase services and deploy.')}</div></div>`;return;}
-  if(state.authLoading){root.innerHTML=`<div class="loading"><div class="logo-mark">A</div><h1>Agree</h1><p>Loading your account…</p></div>`;return;}
+  if(!ready){root.innerHTML=`<div class="auth-wrap"><div class="auth-card"><img class="logo-mark" src="/icons/icon-192x192.png" width="66" height="66" alt="" /><h1>Connect your Firebase app</h1><p>This PWA is intentionally not connected to anyone else's project.</p>${note('warn','Edit <strong>public/firebase-config.js</strong> and add your web app config and public VAPID key. Follow README.md to enable Firebase services and deploy.')}</div></div>`;return;}
+  if(state.authLoading){root.innerHTML=`<div class="loading"><img class="logo-mark" src="/icons/icon-192x192.png" width="66" height="66" alt="" /><h1>Leaguefolk</h1><p>Loading your account…</p></div>`;return;}
   if(!state.user){root.innerHTML=authScreen();return;}
-  if(!state.profile?.username){root.innerHTML=profileSetup();return;}
-  if(!backendEnabled){root.innerHTML=accountScreen();return;}
+  if(!state.profile?.username||!validAvatar(state.profile.avatarId)){root.innerHTML=profileSetup();return;}
+  if(!backendEnabled){root.innerHTML=accountScreen();characterTooltip.sync();return;}
+  if(state.pendingInvite){root.innerHTML=inviteScreen();return;}
   if(state.showGroupPicker||!state.groupId||!myGroup()){root.innerHTML=groupsScreen();return;}
   if(!state.group){root.innerHTML=groupStatusScreen();return;}
   const v=state.route.view;
   const match=state.tickets.find(t=>t.id===state.route.ticketId);
   let content='',active=v,title='Leaderboard',back=false;
-  if(v==='leaderboard')content=rankContent();
+  if(v==='leaderboard'){root.innerHTML=leaderboardScreen();return;}
+  else if(v==='matchups'){title=state.route.opponentId?'Matchup':'Matchups';content=matchupContent();active='matchups';back=!!state.route.opponentId;}
   else if(v==='matches'){title='Matches';content=ticketsContent();}
   else if(v==='new'){title='Record match';content=newMatchContent();active='matches';back=true;}
   else if(v==='ticket'){title='Match details';content=ticketContent(match);active='matches';back=true;}
   else if(v==='inbox'){title='Inbox';content=inboxContent();}
-  else if(v==='profile'){title='Profile';content=profileContent();}
-  else {content=rankContent();active='leaderboard';}
+  else if(v==='profile'||v==='player'){root.innerHTML=accountScreen();characterTooltip.sync();return;}
+  else {root.innerHTML=leaderboardScreen();return;}
   root.innerHTML=shell(title,content,active,back);
+  if(v==='new')mountMatchComposer(root,value=>{state.draft.losingScore=String(value);});
+  if(v==='matches')mountMatchSwipes(root);
 }
 function groupStatusScreen(){
   const title=state.groupLoading?'Loading group…':'Group unavailable';
@@ -196,19 +231,26 @@ function groupStatusScreen(){
 }
 function authScreen(){
   const mode=state.authMode,create=mode==='signup',reset=mode==='reset',sent=mode==='resetSent',welcome=mode==='welcome',disabled=state.authBusy?'disabled':'';
-  const google=`<button type="button" class="btn auth-google" data-action="googleSignIn" ${disabled}><svg width="20" height="20" viewBox="0 0 24 24" aria-hidden="true"><path fill="#4285F4" d="M21.6 12.23c0-.71-.06-1.39-.18-2.05H12v3.88h5.38a4.6 4.6 0 0 1-2 3.02v2.51h3.24c1.9-1.75 2.98-4.33 2.98-7.36Z"/><path fill="#34A853" d="M12 22c2.7 0 4.96-.9 6.62-2.41l-3.24-2.51c-.9.6-2.04.96-3.38.96-2.6 0-4.8-1.76-5.59-4.12H3.07v2.59A10 10 0 0 0 12 22Z"/><path fill="#FBBC05" d="M6.41 13.92a6 6 0 0 1 0-3.84V7.49H3.07a10 10 0 0 0 0 9.02l3.34-2.59Z"/><path fill="#EA4335" d="M12 5.96c1.47 0 2.79.51 3.82 1.51l2.87-2.87A9.6 9.6 0 0 0 12 2a10 10 0 0 0-8.93 5.49l3.34 2.59C7.2 7.72 9.4 5.96 12 5.96Z"/></svg>${state.authBusy==='google'?'Connecting to Google…':'Continue with Google'}</button>`;
+  const google=`<button type="button" class="btn auth-google" data-action="googleSignIn" ${disabled}><span class="auth-button-icon" aria-hidden="true"><svg width="24" height="24" viewBox="0 0 24 24"><path fill="#4285F4" d="M21.6 12.23c0-.71-.06-1.39-.18-2.05H12v3.88h5.38a4.6 4.6 0 0 1-2 3.02v2.51h3.24c1.9-1.75 2.98-4.33 2.98-7.36Z"/><path fill="#34A853" d="M12 22c2.7 0 4.96-.9 6.62-2.41l-3.24-2.51c-.9.6-2.04.96-3.38.96-2.6 0-4.8-1.76-5.59-4.12H3.07v2.59A10 10 0 0 0 12 22Z"/><path fill="#FBBC05" d="M6.41 13.92a6 6 0 0 1 0-3.84V7.49H3.07a10 10 0 0 0 0 9.02l3.34-2.59Z"/><path fill="#EA4335" d="M12 5.96c1.47 0 2.79.51 3.82 1.51l2.87-2.87A9.6 9.6 0 0 0 12 2a10 10 0 0 0-8.93 5.49l3.34 2.59C7.2 7.72 9.4 5.96 12 5.96Z"/></svg></span><span class="auth-button-label">${state.authBusy==='google'?'Connecting to Google…':'Continue with Google'}</span></button>`;
   const emailField=`<div class="field"><label for="authEmail">Email address</label><input id="authEmail" class="input" type="email" name="email" value="${esc(state.authEmail)}" required autocomplete="email" inputmode="email" autocapitalize="none" spellcheck="false" placeholder="you@example.com"/></div>`;
   let content;
-  if(welcome)content=`<section class="onboarding-copy" aria-labelledby="welcomeTitle"><span class="auth-eyebrow">A LITTLE FRIENDLY COMPETITION</span><h1 id="welcomeTitle">Your game.<br><span>Your people.</span></h1><p>Play together. Make every match count.</p></section><div class="auth-entry">${google}<div class="auth-choice-divider" aria-hidden="true"><span>or</span></div>${button('Continue with email','emailSignIn','auth-email',disabled)}<p class="auth-caption">Good games start with a little Agree.</p></div>`;
-  else content=`<section class="auth-panel" aria-labelledby="authTitle" aria-busy="${!!state.authBusy}"><button type="button" class="auth-back" data-action="${reset||sent?'emailSignIn':'authWelcome'}" ${disabled}>← <span>${reset||sent?'Back to sign in':'All sign-in options'}</span></button><span class="auth-eyebrow">${sent?'ONE MORE STEP':reset?'LET’S GET YOU BACK IN':create?'JOIN THE GAME':'WELCOME BACK'}</span><h1 id="authTitle" tabindex="-1">${sent?'Check your inbox':reset?'Forgot password?':create?'Create your account':'Sign in with email'}</h1><p class="auth-description">${sent?`If an account uses <strong>${esc(state.authEmail)}</strong>, you’ll receive a password reset link. Check your spam folder too.`:reset?'Enter your email and we’ll send you a link to reset your password.':create?'A name, an email, and you’re ready to play.':'Your next match is waiting.'}</p>${sent?`${button('Back to sign in','emailSignIn','',disabled)}<button type="button" class="link-btn auth-switch" data-action="forgotPassword" ${disabled}>Try another email or resend</button>`:`<form id="authForm">${create?'<div class="field"><label for="authName">Unique username</label><input id="authName" class="input" name="displayName" minlength="3" maxlength="24" pattern="[A-Za-z0-9_]{3,24}" required placeholder="alex_21" autocomplete="username"/><span class="field-hint">3–24 letters, numbers or underscores. Must be unique.</span></div>':''}${emailField}${reset?'':`<div class="field"><label for="authPassword">Password</label><input id="authPassword" class="input" type="password" name="password" ${create?'minlength="6"':''} required autocomplete="${create?'new-password':'current-password'}" placeholder="${create?'At least 6 characters':'Enter your password'}"/>${create?'<span class="field-hint">Use at least 6 characters.</span>':''}</div>${create?'':'<button type="button" class="link-btn auth-forgot" data-action="forgotPassword">Forgot password?</button>'}`}<button class="btn" type="submit" ${disabled}>${reset?'Send reset link':create?'Create account':'Sign in'}</button></form>${reset?'':`<p class="auth-switch">${create?'Already have an account?':'New to Agree?'} <button type="button" class="link-btn" data-action="switchAuth" ${disabled}>${create?'Sign in':'Create account'}</button></p><div class="auth-divider"><span>or</span></div>${google}`}`}</section>`;
-  return onboardingShell(content,welcome);
+  if(welcome)content=`<section class="auth-welcome" aria-labelledby="welcomeTitle"><div class="auth-welcome-hero"><h1 id="welcomeTitle" class="onboarding-brand">Leaguefolk</h1></div><div class="auth-entry" aria-busy="${!!state.authBusy}">${google}<button type="button" class="btn auth-email" data-action="emailSignIn" ${disabled}><span class="auth-button-icon" aria-hidden="true"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="5" width="18" height="14" rx="3"/><path d="m4 7 8 6 8-6"/></svg></span><span class="auth-button-label">Continue with Email</span></button></div></section>`;
+  else {
+    const title=sent?'Check your inbox':reset?'Forgot password?':create?'Create your account':'Sign in with email';
+    const description=sent?`If an account uses <strong>${esc(state.authEmail)}</strong>, a reset link is on its way. Check your spam folder too.`:reset?'We’ll email you a link to reset your password.':'';
+    const passwordField=`<div class="field"><label for="authPassword">Password</label><input id="authPassword" class="input" type="password" name="password" ${create?'minlength="6"':''} required autocomplete="${create?'new-password':'current-password'}" placeholder="${create?'At least 6 characters':'Enter your password'}"/></div>`;
+    const accountLinks=create?`<p class="auth-switch">Already have an account? <button type="button" class="link-btn" data-action="switchAuth" ${disabled}>Sign in</button></p>`:`<div class="auth-login-links"><button type="button" class="link-btn" data-action="switchAuth" ${disabled}>Create account</button><button type="button" class="link-btn" data-action="forgotPassword" ${disabled}>Forgot password?</button></div>`;
+    content=`<section class="auth-panel auth-${mode}" aria-labelledby="authTitle" aria-busy="${!!state.authBusy}"><div class="auth-heading"><h1 id="authTitle" tabindex="-1">${title}</h1>${description?`<p class="auth-description">${description}</p>`:''}</div>${sent?`${button('Back to sign in','emailSignIn','',disabled)}<button type="button" class="link-btn auth-resend" data-action="forgotPassword" ${disabled}>Resend or try another email</button>`:`<form id="authForm">${emailField}${reset?'':passwordField}<button class="btn" type="submit" ${disabled}>${reset?'Send reset link':create?'Create account':'Sign in'}</button></form>${reset?'':`${accountLinks}<div class="auth-divider"><span>or</span></div>${google}`}`}</section>`;
+  }
+  return onboardingShell(content,welcome,'',welcome?null:{action:reset||sent?'emailSignIn':'authWelcome',label:reset||sent?'Back to sign in':'All sign-in options',disabled});
 }
-function onboardingShell(content,welcome=false){return `<main class="onboarding ${welcome?'is-welcome':'is-form'}"><div class="onboarding-background" aria-hidden="true"><div class="onboarding-court"></div><div class="onboarding-orb"></div></div><header class="onboarding-brand"><span class="onboarding-mark" aria-hidden="true">A</span> agree<span class="brand-period">.</span></header><div class="onboarding-body">${content}</div></main>`;}
+function onboardingShell(content,welcome=false,variant='',back=null){return `<main class="onboarding ${welcome?'is-welcome':'is-form'} ${variant}"><div class="onboarding-background" aria-hidden="true"></div>${welcome?'':`<header class="onboarding-header">${back?`<button type="button" class="account-icon-button auth-back" data-action="${esc(back.action)}" aria-label="${esc(back.label)}" ${back.disabled||''}>${accountIcon('chevron')}</button>`:'<span class="auth-header-spacer" aria-hidden="true"></span>'}<div class="onboarding-brand">Leaguefolk</div><span class="auth-header-spacer" aria-hidden="true"></span></header>`}<div class="onboarding-body">${content}</div></main>`;}
 function changeAuthMode(mode){
   if(state.authBusy)return;
   state.authMode=mode;showAuthError('');render();
-  document.getElementById('authTitle')?.focus?.();
+  focusAuthTitle();
 }
+function focusAuthTitle(){root.scrollTop=0;document.getElementById('authTitle')?.focus?.({preventScroll:true});}
 async function signInWithGoogle(){
   if(state.authBusy)return;
   if(!state.online){toast('Connect to the internet to sign in with Google.');return;}
@@ -227,28 +269,81 @@ async function signInWithGoogle(){
     showAuthError(messages[e.code]||authErrorText(e));
   }finally{state.authBusy=false;render();}
 }
-function profileSetup(){const suggested=(state.profile?.displayName||state.user?.displayName||'').replace(/[^A-Za-z0-9_]/g,'').slice(0,24),disabled=state.authBusy?'disabled':'';return `<div class="auth-wrap"><div class="auth-card"><div class="logo-mark">A</div><h1>Choose your unique username</h1><p>This is how friends will recognize you. Your username is reserved for your account.</p><form id="profileForm"><div class="field"><label for="onboardingName">Username</label><input id="onboardingName" class="input" name="displayName" minlength="3" maxlength="24" pattern="[A-Za-z0-9_]{3,24}" required placeholder="alex_21" autocomplete="username" value="${esc(suggested)}" aria-describedby="usernameHint"/><div id="usernameHint" class="field-hint">3–24 letters, numbers or underscores. Usernames must be unique, regardless of capitalization.</div></div><button class="btn" type="submit" ${disabled}>Save username & continue</button></form>${button('Sign out','logout','ghost')}</div></div>`;}
-function accountScreen(){return `<div class="auth-wrap"><div class="auth-card"><div class="logo-mark">A</div><h1>Welcome, ${esc(state.profile.displayName)}</h1><p>${esc(state.user.email)}</p>${note('','Your account is ready. Group leaderboards and matches are currently unavailable. Push notifications are turned off.')}<form id="profileForm"><div class="field"><label>Display name</label><input class="input" name="displayName" minlength="2" maxlength="32" required value="${esc(state.profile.displayName)}" autocomplete="nickname"/></div><button class="btn" type="submit">Save profile</button></form>${button('Sign out','logout','ghost')}</div></div>`;}
-function groupsScreen(){return `<div class="auth-wrap"><div class="auth-card"><div class="brand"><div class="brand-icon">A</div> Agree</div><h1>Choose a leaderboard</h1><p>You need an invitation to compete with friends, or you can start a new group.</p>${state.memberships.map(g=>`<button class="group-item" data-action="switchGroup" data-id="${esc(g.groupId)}"><div><strong>${esc(g.name)}</strong><div class="small quiet">Your group</div></div><span>→</span></button>`).join('')}${button('+ Create a new group','openCreateGroup')}${button('Join with invitation code','openJoinGroup','secondary')}<div style="margin-top:16px">${button('Sign out','logout','ghost')}</div></div></div>${state.dialog?modal():''}`;}
+function profileFields(){
+  const suggested=(state.profile?.displayName||state.user?.displayName||'').replace(/[^A-Za-z0-9_]/g,'').slice(0,24);
+  return `<div class="field"><label for="onboardingName">Username</label><input id="onboardingName" class="input" name="displayName" minlength="3" maxlength="24" pattern="[A-Za-z0-9_]{3,24}" title="Use 3–24 letters, numbers or underscores." required placeholder="Your username" autocomplete="username" value="${esc(suggested)}" ${state.profile?.username?'readonly':''}/></div>${avatarPicker(state.avatarId)}`;
+}
+function profileSetup(){const returning=!!state.profile?.username;return onboardingShell(`<section class="auth-panel player-setup" aria-labelledby="playerTitle"><header class="player-heading"><h1 id="playerTitle">${returning?'Choose your<br><span>character.</span>':'Choose your name<br><span>& character.</span>'}</h1></header><form id="profileForm">${returning?`<input type="hidden" name="displayName" value="${esc(state.profile.displayName)}"/>${avatarPicker(state.avatarId)}`:profileFields()}<button class="btn" type="submit">Continue</button></form></section>`,false,'is-player',{action:'logout',label:'Use a different account'});}
+function currentAchievements(){return accountAchievements({tickets:state.tickets,uid:state.route.view==='player'?state.route.playerId:state.user.uid,groupId:state.groupId,members:state.members});}
+function accountScreen(){const target=state.route.view==='player'?state.members.find(m=>m.id===state.route.playerId):null;if(state.route.view==='player'&&!target)return shell('Player profile','<div class="activity-empty"><h2>Player unavailable</h2><p>This player is not a current member of this group.</p></div>','',true);return renderAccountPage({viewerUid:state.user.uid,user:target?{uid:target.id}:state.user,profile:target||state.profile,group:state.group,members:state.members,tickets:state.tickets,tab:state.profileTab,backendEnabled,online:state.online,unread:state.notifications.some(n=>!n.readAt),dialog:state.dialog?modal():''});}
+function groupsScreen(){return onboardingShell(`<section class="auth-panel"><h1>Choose a leaderboard</h1><p class="auth-description">You need an invitation to compete with friends, or you can start a new group.</p>${renderGroupTiles(state.memberships,state.groupTiles,state.groupId)}${button('+ Create a new group','openCreateGroup')}${button('Join with invitation code','openJoinGroup','secondary')}<div style="margin-top:16px">${button('Sign out','logout','ghost')}</div></section>`)+(state.dialog?modal():'');}
+function inviteScreen(){
+  if(!state.inviteLoading&&!state.invite&&!state.inviteError&&state.online)loadPendingInvite();
+  return renderInvitePage({invite:state.invite,profile:state.profile,loading:state.inviteLoading,busy:state.inviteBusy,error:state.inviteError,online:state.online});
+}
+async function loadPendingInvite(){
+  if(state.pendingInvite?.invalid){state.inviteError='This invitation link is invalid.';return;}
+  const code=state.pendingInvite?.code,userId=state.user?.uid;
+  if(!code||!userId||!state.profile?.username||!validAvatar(state.profile.avatarId)||!state.online)return;
+  const generation=++inviteLoadVersion,active=()=>generation===inviteLoadVersion&&state.user?.uid===userId&&state.pendingInvite?.code===code;
+  state.inviteLoading=true;state.inviteError='';render();
+  try{
+    const index=await getDoc(doc(store,'inviteCodes',code));
+    if(!index.exists())throw {code:'not-found'};
+    const {groupId,name}=index.data();
+    const [players,own]=await Promise.all([getDocs(query(collection(store,'inviteCodes',code,'players'),orderBy('wins','desc'),limit(20))),getDoc(doc(store,'groups',groupId,'members',userId))]);
+    if(active())state.invite={code,groupId,name,players:players.docs.map(d=>({id:d.id,...d.data()})),alreadyMember:own.exists()};
+  }catch(e){if(active()){state.inviteError=e.code==='not-found'?'This invitation is no longer available.':'Could not open this invitation. Please try again.';console.warn('Invite preview unavailable',e);}}
+  finally{if(active()){state.inviteLoading=false;render();}}
+}
+function clearPendingInvite(){inviteIntent.clear();inviteLoadVersion++;state.pendingInvite=null;state.invite=null;state.inviteLoading=false;state.inviteBusy=false;state.inviteError='';}
+function openInvite(code){
+  const valid=normalizeInvite(code);if(!valid)throw new Error('Enter a valid 8-character invite code.');
+  state.pendingInvite=inviteIntent.set(valid);inviteLoadVersion++;state.invite=null;state.inviteError='';state.inviteLoading=false;state.inviteBusy=false;
+  navigate('/invite/'+valid);
+}
+async function acceptPendingInvite(){
+  if(state.inviteBusy||!state.invite||!state.online)return;
+  const code=state.pendingInvite.code,userId=state.user.uid,invite=state.invite;
+  const active=()=>state.user?.uid===userId&&state.pendingInvite?.code===code;
+  state.inviteBusy=true;state.inviteError='';render();
+  try{
+    const result=invite.alreadyMember?invite:await call('joinGroup',{code});
+    if(!active())return;
+    if(!state.memberships.some(g=>g.groupId===result.groupId))state.memberships.push({groupId:result.groupId,name:result.name});
+    clearPendingInvite();navigate(`/g/${result.groupId}/leaderboard`,true);toast(invite.alreadyMember?'Welcome back.':'You joined '+result.name+'.');
+  }catch(e){if(active()){state.inviteError='Could not join the group. Please try again.';console.warn('Joining group failed',e);}}
+  finally{if(active()){state.inviteBusy=false;render();}}
+}
+async function shareGroupInvitation(groupId){
+  const userId=state.user?.uid;
+  const membership=state.memberships.find(g=>g.groupId===groupId);if(!membership)throw new Error('You can only invite players to your groups.');
+  let group=state.group?.id===groupId?state.group:state.groupTiles[groupId]?.group;
+  if(!group){const info=await getDoc(doc(store,'groups',groupId));if(!info.exists())throw new Error('This group is unavailable.');group=info.data();}
+  if(state.user?.uid!==userId)return;
+  const url=groupInviteUrl(location.origin,group.inviteCode),text=`Join ${group.name} on Leaguefolk.`;
+  if(navigator.share){try{await navigator.share({title:group.name+' · Leaguefolk',text,url});return;}catch(e){if(e.name==='AbortError')return;if(e.name!=='NotAllowedError')throw e;}}
+  await navigator.clipboard.writeText(text+'\n'+url);toast('Invitation link copied.');
+}
+function syncGroupTiles(){
+  const userId=state.user?.uid;if(!userId)return;
+  const ids=new Set(state.memberships.map(g=>g.groupId));
+  Object.keys(unsub).filter(key=>key.startsWith('tile:')&&!ids.has(key.slice(5))).forEach(key=>{unsub[key]?.();delete unsub[key];delete state.groupTiles[key.slice(5)];});
+  for(const {groupId} of state.memberships){
+    const key='tile:'+groupId;if(unsub[key])continue;
+    const active=()=>state.user?.uid===userId&&state.memberships.some(g=>g.groupId===groupId);
+    subscribed(key,onSnapshot(query(collection(store,'groups',groupId,'members'),orderBy('joinedAt'),limit(3)),snap=>{if(active()){state.groupTiles[groupId]={...state.groupTiles[groupId],members:snap.docs.map(d=>({id:d.id,...d.data()}))};render();}},e=>console.warn('Group avatars unavailable',e)));
+    getDoc(doc(store,'groups',groupId)).then(snap=>{if(active()&&snap.exists()){state.groupTiles[groupId]={...state.groupTiles[groupId],group:snap.data()};render();}}).catch(e=>console.warn('Group invitation unavailable',e));
+  }
+}
 async function call(name,data){if(!backendEnabled)throw new Error('Group leaderboards and matches are currently unavailable.');return firestoreApi(name,data);}
-async function saveUserProfile(displayName){return firestoreApi('saveProfile',{displayName});}
+async function saveUserProfile(displayName,avatarId){const profile=await firestoreApi('saveProfile',{displayName,avatarId:avatarId||state.avatarId});state.avatarId=profile.avatarId;return profile;}
 async function saveOutbox(action){await enqueue(action);await refreshOutbox();toast(state.online?'Sending safely…':'Saved offline. Will send when you reopen online.');
   if(state.online)flushOutbox();else if(swReg?.sync)swReg.sync.register('agree-queued-actions').catch(()=>{});
 }
 async function refreshOutbox(){try{state.queue=state.user?await forUser(state.user.uid):[];render();}catch(e){toast('Offline storage unavailable: '+errText(e));}}
-async function flushOutbox(){if(!backendEnabled||flushBusy||!state.user||!state.profile?.username||!state.online)return;flushBusy=true;
-  try{const replayUid=state.user.uid,jobs=await forUser(replayUid);
-    for(const job of jobs){if(state.user?.uid!==replayUid||auth.currentUser?.uid!==replayUid)break;if(job.status==='blocked')continue;
-      await patchAction(job.id,{status:'sending'});
-      try{await call(job.kind,job.payload);await deleteAction(job.id);toast('Saved to leaderboard ✓');}
-      catch(e){const code=String(e.code||'').replace(/^(functions|firestore)\//,'');
-        if(['failed-precondition','permission-denied','invalid-argument','already-exists','not-found'].includes(code)){
-          await patchAction(job.id,{status:'blocked',attempts:(job.attempts||0)+1,error:errText(e)});toast('A queued action needs your review.');continue;
-        }
-        await patchAction(job.id,{status:'queued',attempts:(job.attempts||0)+1,error:errText(e)});
-        break; // transient network or auth failure; retry on next online/visibility/foreground interval
-      }
-    }
+async function flushOutbox(){if(!backendEnabled||flushBusy||!state.user||!state.profile?.username||!validAvatar(state.profile.avatarId)||!state.online)return;flushBusy=true;
+  try{await replayOutbox({uid:state.user.uid,currentUid:()=>state.online&&state.user?.uid===auth.currentUser?.uid?state.user?.uid:null,list:forUser,patch:patchAction,send:call,remove:deleteAction,onSent:job=>toast(job.kind==='submitMatch'?'Score sent for confirmation':'Match updated ✓'),onBlocked:()=>toast('A queued action needs your review.')});
   }catch(e){console.warn('Outbox replay failed',e);}
   finally{flushBusy=false;await refreshOutbox();}
 }
@@ -258,7 +353,26 @@ async function act(kind,t,extra={}){if(!t)return;
   await saveOutbox({id:payload.actionId,uid:state.user.uid,kind:'mutateTicket',payload});
   state.dialog=null;render();
 }
-function openDialog(kind,t){state.dialog={kind,ticketId:t?.id};state.draft={};render();}
+function openAcceptAll(){
+  if(state.bulkAcceptBusy)return;
+  const plan=buildAcceptancePlan(state.tickets,state.user?.uid,state.groupId,state.queue);
+  if(!plan.items.length){toast('No score requests are ready to accept.');return;}
+  state.dialog={kind:'acceptAll',plan};render();
+}
+async function commitAcceptAll(){
+  const plan=state.dialog?.kind==='acceptAll'?state.dialog.plan:null;
+  if(!plan||state.bulkAcceptBusy)return;
+  const operationVersion=++bulkAcceptVersion;state.bulkAcceptBusy=true;render();
+  try{
+    const result=await queueAcceptancePlan(plan,{currentUid:()=>auth.currentUser?.uid===state.user?.uid?state.user?.uid:null,currentGroupId:()=>state.groupId,getTickets:()=>state.tickets,getQueue:()=>state.queue,enqueue});
+    if(state.user?.uid!==plan.uid||state.groupId!==plan.groupId)return;
+    state.dialog=null;await refreshOutbox();
+    toast(result.queued+' confirmations queued.'+(result.skipped?' '+result.skipped+' changed or need review.':'')+(result.failed?' '+result.failed+' could not be saved.':''));
+    if(state.online)flushOutbox();
+  }catch(error){toast(errText(error));}
+  finally{if(operationVersion===bulkAcceptVersion){state.bulkAcceptBusy=false;render();}}
+}
+function openDialog(kind,t){characterTooltip.hide({immediate:true});state.dialog={kind,ticketId:t?.id};state.draft={};render();}
 async function syncPushToken(){
   if(!pushEnabled)return;
   if(!state.user || !state.online || location.protocol!=='https:' || location.hostname==='localhost')return;
@@ -291,16 +405,16 @@ async function enablePush(){
   }catch(e){console.error(e);toast('Push setup: '+errText(e));}
 }
 function ensureRoute(){
-  if(!backendEnabled||!state.user||!state.profile?.username||state.showGroupPicker)return;
+  if(!backendEnabled||!state.user||!state.profile?.username||!validAvatar(state.profile.avatarId)||state.showGroupPicker||state.pendingInvite)return;
   const route=state.route;
   if(route.groupId&&state.memberships.some(g=>g.groupId===route.groupId)){
-    if(state.groupId!==route.groupId){state.groupId=route.groupId;localStorage.setItem('agree-group',route.groupId);listenGroup();}
+    if(state.groupId!==route.groupId){state.groupId=route.groupId;writeLocal('agree-group',route.groupId);listenGroup();}
     if(route.view==='ticket')listenEvents(route.ticketId);
     return;
   }
   if(route.groupId){state.groupId=null;stopGroupListeners();return;}
-  const selected=state.memberships.some(g=>g.groupId===state.groupId)?state.groupId:(state.memberships.find(g=>g.groupId===localStorage.getItem('agree-group'))?.groupId||state.memberships[0]?.groupId);
-  if(selected&&state.groupId!==selected){state.groupId=selected;localStorage.setItem('agree-group',selected);listenGroup();}
+  const selected=state.memberships.some(g=>g.groupId===state.groupId)?state.groupId:(state.memberships.find(g=>g.groupId===readLocal('agree-group'))?.groupId||state.memberships[0]?.groupId);
+  if(selected&&state.groupId!==selected){state.groupId=selected;writeLocal('agree-group',selected);listenGroup();}
   else if(!selected&&state.groupId){state.groupId=null;stopGroupListeners();}
 }
 function listenGroup(){
@@ -332,19 +446,21 @@ function listenEvents(ticketId){if(!state.groupId||!ticketId)return;const gid=st
 function listenUser(uidValue){
   subscribed('memberships',onSnapshot(collection(store,'users',uidValue,'memberships'),snap=>{
     state.memberships=snap.docs.map(d=>({id:d.id,...d.data()}));
+    syncGroupTiles();
     ensureRoute();render();
   },e=>toast(errText(e))));
   subscribed('notifications',onSnapshot(query(collection(store,'users',uidValue,'notifications'),orderBy('createdAt','desc'),limit(70)),snap=>{
     state.notifications=snap.docs.map(d=>({id:d.id,...d.data()}));render();
   },e=>toast(errText(e))));
 }
-async function authChanged(user){
-  unsubscribeAll();stopGroupListeners();state.user=user;state.showGroupPicker=false;state.groupId=null;state.profile=null;state.memberships=[];state.notifications=[];state.queue=[];
-  if(!user){state.authLoading=false;render();return;}
+async function authChanged(user){closeQuickOpponents();bulkAcceptVersion++;state.bulkAcceptBusy=false;state.dialog=null;state.draft={};
+  characterTooltip.hide({immediate:true});
+  unsubscribeAll();stopGroupListeners();inviteLoadVersion++;state.pendingInvite=inviteIntent.get();state.invite=null;state.inviteLoading=false;state.inviteBusy=false;state.inviteError='';state.groupTiles={};state.user=user;state.showGroupPicker=false;state.groupId=null;state.profile=null;state.memberships=[];state.notifications=[];state.queue=[];
+  if(!user){state.avatarId=randomAvatar().id;state.authLoading=false;render();return;}
   try{const profile=await getDoc(doc(store,'users',user.uid));
     if(state.user?.uid!==user.uid)return;
-    state.profile=profile.exists()?profile.data():state.profile;
-    if(backendEnabled&&state.profile?.username)listenUser(user.uid);state.authLoading=false;render();if(backendEnabled)await refreshOutbox();if(state.online){flushOutbox();syncPushToken();}}
+    state.profile=profile.exists()?profile.data():state.profile;state.avatarId=validAvatar(state.profile?.avatarId)?state.profile.avatarId:avatarFor(state.avatarId).id;
+    if(backendEnabled&&state.profile?.username&&validAvatar(state.profile.avatarId))listenUser(user.uid);state.authLoading=false;render();if(backendEnabled)await refreshOutbox();if(state.online){flushOutbox();syncPushToken();}}
   catch(e){state.authLoading=false;toast('Profile: '+errText(e));render();}
 }
 function start(){
@@ -360,57 +476,87 @@ function start(){
   auth=getAuth(firebaseApp);
   try{store=initializeFirestore(firebaseApp,{localCache:persistentLocalCache({tabManager:persistentMultipleTabManager()})});}
   catch(e){console.warn('Persistent cache unavailable; using memory fallback',e);store=getFirestore(firebaseApp);}
-  firestoreApi=createFirestoreApi(store,auth,{doc,runTransaction,serverTimestamp,getDocs,collection,updateDoc});
-  if('serviceWorker' in navigator){navigator.serviceWorker.register('/firebase-messaging-sw.js',{scope:'/'}).then(r=>{swReg=r;}).catch(e=>console.warn('PWA worker registration failed',e));
+  if(settings.emulators){
+    if(!['localhost','127.0.0.1'].includes(location.hostname)||!settings.firebaseConfig.projectId.startsWith('demo-'))throw new Error('Emulator configuration requires a local demo project.');
+    connectAuthEmulator(auth,'http://127.0.0.1:9199',{disableWarnings:true});
+    connectFirestoreEmulator(store,'127.0.0.1',8180);
+  }
+  firestoreApi=createFirestoreApi(store,auth,{doc,runTransaction,serverTimestamp,increment,getDocs,collection});
+  if(!settings.emulators&&'serviceWorker' in navigator){navigator.serviceWorker.register('/firebase-messaging-sw.js',{scope:'/'}).then(r=>{swReg=r;}).catch(e=>console.warn('PWA worker registration failed',e));
     navigator.serviceWorker.addEventListener('message',e=>{if(e.data?.type==='FLUSH_QUEUE')flushOutbox();});}
   if(pushEnabled)isSupported().then(s=>{if(!s)return; messaging=getMessaging(firebaseApp);onMessage(messaging,payload=>{
     toast(payload.notification?.title||'A match was updated.',payload.data?.path);
   });}).catch(e=>console.warn('FCM not supported',e));
   onAuthStateChanged(auth,authChanged);
 }
-window.addEventListener('popstate',()=>{state.showGroupPicker=false;state.route=parsePath();state.dialog=null;ensureRoute();render();});
-window.addEventListener('online',()=>{state.online=true;render();flushOutbox();syncPushToken();});
+window.addEventListener('popstate',()=>{const previous=state.pendingInvite?.code;state.pendingInvite=inviteIntent.capture(location);if(previous!==state.pendingInvite?.code){inviteLoadVersion++;state.invite=null;state.inviteLoading=false;state.inviteBusy=false;state.inviteError='';}state.showGroupPicker=false;state.route=parsePath();state.dialog=null;ensureRoute();render();});
+window.addEventListener('online',()=>{state.online=true;if(state.pendingInvite&&!state.invite)state.inviteError='';render();flushOutbox();syncPushToken();});
 window.addEventListener('offline',()=>{state.online=false;render();});
 document.addEventListener('visibilitychange',()=>{if(document.visibilityState==='visible'){state.online=navigator.onLine;flushOutbox();syncPushToken();}});
 setInterval(()=>{if(state.user&&navigator.onLine){state.online=true;flushOutbox();}},30000);
+bindAvatarGestures(document,id=>{state.avatarId=id;});
+bindDrawerGestures(document,()=>{if(!state.bulkAcceptBusy){state.dialog=null;render();}});
+closeQuickOpponents=bindQuickOpponents(document,{getOpponents:()=>state.user&&state.group?recordOpponents():[],onChoose:id=>openRecordMatch(id)});
 // Single delegated interaction layer keeps the markup simple.
 document.addEventListener('click',async e=>{
+  if(!e.target.closest?.('.account-character-meta'))characterTooltip.hide();
   const b=e.target.closest('[data-action]');if(!b)return;
   const action=b.dataset.action,id=b.dataset.id,t=state.tickets.find(v=>v.id===state.route.ticketId);
   try{
-    if(action==='googleSignIn')await signInWithGoogle();
+    if(action==='avatarPrevious'||action==='avatarNext'){const picker=b.closest('.character-picker');if(picker&&!picker.disabled)state.avatarId=stepAvatarPicker(picker,action==='avatarNext'?1:-1);}
+    else if(action==='accountSettings')openDialog('accountSettings');
+    else if(action==='accountInvite')openDialog('accountInvite');
+    else if(action==='characterInfo')characterTooltip.toggle(b);
+    else if(action==='profileTab'&&['stats','achievements'].includes(b.dataset.value)){state.profileTab=b.dataset.value;render();document.querySelector?.('#account-tab-'+state.profileTab)?.focus?.();}
+    else if(action==='accountAchievement'){if(currentAchievements().some(a=>a.id===id)){state.dialog={kind:'accountAchievement',achievementId:id};render();}}
+    else if(action==='editProfile'){state.avatarId=avatarFor(state.profile?.avatarId).id;openDialog('editProfile');}
+    else if(action==='googleSignIn')await signInWithGoogle();
     else if(action==='retryGroup'){listenGroup();render();}
-    else if(action==='showGroups'){state.showGroupPicker=true;state.groupId=null;stopGroupListeners();state.loadError='';history.replaceState({},'','/');state.route=parsePath();render();}
-    else if(action==='back'){if(state.dialog){state.dialog=null;render();}else go('matches');}
+    else if(action==='showGroups'){state.showGroupPicker=true;state.groupId=null;stopGroupListeners();state.loadError='';history.replaceState({},'',inviteIntent.path('/'));state.route=parsePath();render();}
+    else if(action==='openPlayer'){if(!state.members.some(m=>m.id===id)){toast('This player is not in the current group.');return;}state.playerReturnPath=location.pathname;state.profileTab='achievements';navigate('/g/'+state.groupId+'/'+(id===state.user.uid?'profile':'players/'+encodeURIComponent(id)));}
+    else if(action==='back'){if(state.dialog){state.dialog=null;render();}else if(state.route.view==='player'){const path=state.playerReturnPath;state.playerReturnPath=null;navigate(path?.startsWith('/g/'+state.groupId+'/')?path:'/g/'+state.groupId+'/leaderboard');}else go(state.route.view==='matchups'?'matchups':'matches');}
     else if(action==='nav')go(b.dataset.view);
-    else if(action==='newMatch')go('new');
+    else if(action==='newMatch')openRecordMatch();
+    else if(action==='recordOpponent')openRecordMatch(id);
+    else if(action==='openMatchup')navigate('/g/'+state.groupId+'/matchups/'+encodeURIComponent(id));
+    else if(action==='matchupTab'){state.matchupTab=b.dataset.value==='club'?'club':'yours';render();document.querySelector?.('#matchup-tab-'+state.matchupTab)?.focus?.({preventScroll:true});}
+    else if(action==='chooseOpponent'){if(state.members.some(m=>m.id===id&&id!==state.user.uid)){state.draft={opponentUid:id,note:state.draft.note||''};render();}}
+    else if(action==='changeOpponent'){delete state.draft.opponentUid;render();}
+    else if(action==='favoriteOpponent'){
+      const favorites=opponentFavorites(),next=favorites.includes(id)?favorites.filter(v=>v!==id):[...favorites,id];
+      writeLocal('leaguefolk-favorites:'+state.user.uid+':'+state.groupId,JSON.stringify(next));render();
+    }
+    else if(action==='scoreMode'){state.draft.scoreMode=b.dataset.value;render();}
     else if(action==='matches')go('matches');
     else if(action==='openTicket')navigate(`/g/${state.groupId}/t/${id}`);
     else if(action==='openNotification'){
       const n=state.notifications.find(v=>v.id===id);if(n){if(!n.readAt)updateDoc(doc(store,'users',state.user.uid,'notifications',id),{readAt:serverTimestamp()}).catch(()=>{});navigate(n.path);}
     }
     else if(action==='groupSwitch')openDialog('groupSwitch');
+    else if(action==='shareGroupInvite')await shareGroupInvitation(id);
+    else if(action==='acceptInvite')await acceptPendingInvite();
+    else if(action==='declineInvite'&&!state.inviteBusy){clearPendingInvite();navigate('/',true);}
+    else if(action==='retryInvite'&&!state.inviteBusy)await loadPendingInvite();
     else if(action==='openCreateGroup')openDialog('createGroup');
     else if(action==='openJoinGroup')openDialog('joinGroup');
     else if(action==='switchGroup'){state.dialog=null;navigate(`/g/${id}/leaderboard`);}
     else if(action==='closeDialog'){state.dialog=null;render();}
     else if(action==='backdrop'&&e.target===b){state.dialog=null;render();}
-    else if(action==='period'){state.period=b.dataset.value;render();}
-    else if(action==='matchTab'){state.matchTab=b.dataset.value;render();}
+    else if(action==='period'&&['weekly','monthly'].includes(b.dataset.value)){state.period=b.dataset.value;render();document.querySelector?.('#leaderboard-tab-'+state.period)?.focus?.({preventScroll:true});}
+    else if(action==='acceptAll')openAcceptAll();
+    else if(action==='commitAcceptAll')await commitAcceptAll();
+    else if(action==='matchTab'){state.matchTab=b.dataset.value;render();document.querySelector?.('#match-tab-'+state.matchTab)?.focus?.({preventScroll:true});}
     else if(action==='confirm')openDialog('confirmAction',t);
     else if(action==='commitConfirm'){await act('confirm',t);}
     else if(['suggest','dispute','editOriginal','amend','counterAmendment'].includes(action))openDialog(action,t);
     else if(action==='requestCancel'||action==='voidMatch')openDialog(action,t);
-    else if(action==='withdrawOriginal'){if(confirm('Withdraw this unanswered match report? No XP will be counted.'))await act('withdrawOriginal',t);}
+    else if(action==='withdrawOriginal'){if(confirm('Withdraw this unanswered match report? No league points will be counted.'))await act('withdrawOriginal',t);}
     else if(action==='acceptCancel')await act('respondCancel',t,{accept:true});
     else if(action==='declineCancel')await act('respondCancel',t,{accept:false});
     else if(action==='acceptAmendment')await act('respondAmendment',t,{expectedRevision:t.amendment.revision,accept:true});
     else if(action==='declineAmendment')await act('respondAmendment',t,{expectedRevision:t.amendment.revision,accept:false});
     else if(action==='copyInvite'){await navigator.clipboard.writeText(state.group.inviteCode);toast('Invite code copied.');}
-    else if(action==='shareInvite'){
-      const text=`Join ${state.group.name} on Agree. Invite code: ${state.group.inviteCode}\n${location.origin}`;
-      if(navigator.share)await navigator.share({text});else{await navigator.clipboard.writeText(text);toast('Invitation copied.');}
-    }
+    else if(action==='shareInvite')await shareGroupInvitation(state.groupId);
     else if(action==='outbox')openDialog('outbox');
     else if(action==='outboxMatch'){state.dialog=null;navigate(`/g/${state.groupId}/t/${id}`);}
     else if(action==='discardJob'){await deleteAction(id);await refreshOutbox();toast('Queued action discarded.');}
@@ -423,13 +569,30 @@ document.addEventListener('click',async e=>{
     else if(action==='forgotPassword')changeAuthMode('reset');
     else if(action==='logout'){
       if(pushEnabled&&!state.online){toast('Reconnect before signing out so notifications can be disabled safely.');return;}
-      const did=localStorage.getItem('agree-device-id');
+      const did=readLocal('agree-device-id');
       if(pushEnabled&&did){try{await call('removeDevice',{deviceId:did});if(messaging)await deleteToken(messaging);}catch(error){toast('Could not disable device push; retry online before signing out.');return;}}
-      await signOut(auth);state.authMode='welcome';state.authEmail='';state.dialog=null;render();history.replaceState({},'','/');state.route=parsePath();toast('Signed out.');
+      await signOut(auth);state.authMode='welcome';state.authEmail='';state.dialog=null;render();history.replaceState({},'',inviteIntent.path('/'));state.route=parsePath();toast('Signed out.');
     }
   }catch(error){console.error(error);toast(errText(error));}
 });
-function preserveDraft(e){if(e.target.name==='email'&&e.target.closest?.('#authForm'))state.authEmail=e.target.value;const form=e.target.closest?.('form');if(!form||!['newMatchForm','scoreForm','cancelForm'].includes(form.id)||!e.target.name)return;state.draft[e.target.name]=e.target.value;}
+function preserveDraft(e){if(e.target.name==='avatarId'){selectAvatar(e);return;}if(e.target.name==='email'&&e.target.closest?.('#authForm'))state.authEmail=e.target.value;const form=e.target.closest?.('form');if(!form||!['newMatchForm','scoreForm','cancelForm'].includes(form.id)||!e.target.name)return;state.draft[e.target.name]=e.target.value;}
+function selectAvatar(e){
+  state.avatarId=avatarFor(e.target.value).id;
+  updateAvatarPicker(e.target.closest?.('.character-picker'),state.avatarId);
+}
+
+document.addEventListener('keydown',e=>{
+  if(e.key==='Escape'&&characterTooltip.isOpen()){e.preventDefault();characterTooltip.hide({immediate:true});return;}
+  const matchupTab=e.target.closest?.('.matchup-tabs [role="tab"]');
+  if(matchupTab&&['ArrowLeft','ArrowRight','Home','End'].includes(e.key)){e.preventDefault();state.matchupTab=e.key==='Home'?'yours':e.key==='End'?'club':state.matchupTab==='yours'?'club':'yours';render();document.querySelector?.('#matchup-tab-'+state.matchupTab)?.focus?.({preventScroll:true});return;}
+  const matchTab=e.target.closest?.('.activity-tabs [role="tab"]');
+  if(matchTab&&['ArrowLeft','ArrowRight','Home','End'].includes(e.key)){e.preventDefault();const values=['sent','requests','verified'],index=values.indexOf(state.matchTab);state.matchTab=e.key==='Home'?'sent':e.key==='End'?'verified':values[(index+(e.key==='ArrowRight'?1:-1)+3)%3];render();document.querySelector?.('#match-tab-'+state.matchTab)?.focus?.({preventScroll:true});return;}
+  const tab=e.target.closest?.('.account-tabs [role="tab"]');
+  const periodTab=e.target.closest?.('.leaderboard-periods [role="tab"]');
+  if(tab&&['ArrowLeft','ArrowRight','Home','End'].includes(e.key)){e.preventDefault();state.profileTab=e.key==='Home'?'stats':e.key==='End'?'achievements':state.profileTab==='stats'?'achievements':'stats';render();document.querySelector?.('#account-tab-'+state.profileTab)?.focus?.();}
+  else if(periodTab&&['ArrowLeft','ArrowRight','Home','End'].includes(e.key)){e.preventDefault();state.period=e.key==='Home'?'weekly':e.key==='End'?'monthly':state.period==='weekly'?'monthly':'weekly';render();document.querySelector?.('#leaderboard-tab-'+state.period)?.focus?.({preventScroll:true});}
+  else if(e.key==='Escape'&&['accountSettings','accountInvite','accountAchievement','editProfile','groupSwitch'].includes(state.dialog?.kind)){const groupSwitch=state.dialog.kind==='groupSwitch';state.dialog=null;render();document.querySelector?.(groupSwitch?'[data-action="groupSwitch"]':'[data-action="accountSettings"]')?.focus?.({preventScroll:true});}
+});
 document.addEventListener('input',preserveDraft);document.addEventListener('change',preserveDraft);
 document.addEventListener('submit',async e=>{
   const form=e.target;if(!['authForm','profileForm','createGroupForm','joinGroupForm','newMatchForm','scoreForm','cancelForm'].includes(form.id))return;
@@ -437,6 +600,7 @@ document.addEventListener('submit',async e=>{
   if(form.id==='authForm'&&state.authBusy)return;
   const submit=form.querySelector('[type=submit]');if(submit?.disabled)return;if(submit)submit.disabled=true;
   const d=Object.fromEntries(new FormData(form));
+  const picker=form.id==='profileForm'?form.querySelector('fieldset.character-picker'):null;if(picker)picker.disabled=true;
   if(form.id==='authForm'){showAuthError('');state.authBusy='email';state.authEmail=d.email.trim();document.querySelectorAll?.('.onboarding button, .onboarding input').forEach(el=>el.disabled=true);}
   try{
     if(form.id==='authForm'){
@@ -445,35 +609,31 @@ document.addEventListener('submit',async e=>{
         try{await sendPasswordResetEmail(auth,d.email.trim());}catch(error){if(error.code!=='auth/user-not-found')throw error;}
         state.authMode='resetSent';render();
       }else if(state.authMode==='signup'){
-        const res=await createUserWithEmailAndPassword(auth,d.email.trim(),d.password);
-        state.profile=await saveUserProfile(d.displayName.trim());
-        await updateProfile(res.user,{displayName:state.profile.displayName}).catch(e=>console.warn('Account display name could not be updated',e));
-        if(backendEnabled)listenUser(res.user.uid);ensureRoute();render();
+        await createUserWithEmailAndPassword(auth,d.email.trim(),d.password);
       }else await signInWithEmailAndPassword(auth,d.email.trim(),d.password);
     }else if(form.id==='profileForm'){
-      state.profile=await saveUserProfile(d.displayName.trim());
+      state.profile=await saveUserProfile(d.displayName.trim(),d.avatarId);
       await updateProfile(auth.currentUser,{displayName:state.profile.displayName}).catch(e=>console.warn('Account display name could not be updated',e));
-      if(backendEnabled)listenUser(auth.currentUser.uid);ensureRoute();render();if(state.online)flushOutbox();toast('Username saved.');
+      if(backendEnabled)listenUser(auth.currentUser.uid);state.dialog=null;ensureRoute();render();if(state.online)flushOutbox();toast('Player saved.');
     }else if(form.id==='createGroupForm'){
       if(!state.online)throw new Error('Creating a group requires an internet connection.');
       const result=await call('createGroup',{actionId:uid(),name:d.name.trim()});state.dialog=null;
       navigate(`/g/${result.groupId}/leaderboard`);toast('Group created! Share its invite code.');
     }else if(form.id==='joinGroupForm'){
-      if(!state.online)throw new Error('Joining requires an internet connection.');
-      const result=await call('joinGroup',{code:d.code});state.dialog=null;
-      navigate(`/g/${result.groupId}/leaderboard`);toast('Joined the group!');
+      openInvite(d.code);
     }else if(form.id==='newMatchForm'){
-      const a=Number(d.scoreSelf),b=Number(d.scoreOpponent);if(!Number.isInteger(a)||!Number.isInteger(b)||a<0||a>200||b<0||b>200)throw Error('Scores must be whole numbers from 0 to 200.');
+      if(!state.members.some(m=>m.id===d.opponentUid&&m.id!==state.user.uid))throw Error('Choose an opponent from your group.');
+      const {a,b}=d.scoreMode==='standard'?standardGameScore(d.losingScore,d.winner):{a:Number(d.scoreSelf),b:Number(d.scoreOpponent)};if(!Number.isInteger(a)||!Number.isInteger(b)||a<0||a>200||b<0||b>200)throw Error('Scores must be whole numbers from 0 to 200.');
       const possibleDuplicate=state.tickets.some(t=>{
         if(t.status==='cancelled')return false;
-        if(![t.playerA,t.playerB].includes(d.opponentUid))return false;
+        if(![t.playerA,t.playerB].includes(state.user.uid)||![t.playerA,t.playerB].includes(d.opponentUid))return false;
         const recent=when(t.createdAt);if(!recent||Date.now()-recent.getTime()>45*60*1000)return false;
         const score=t.finalScore||t.proposal?.score;
         return t.playerA===state.user.uid?(score?.a===a&&score?.b===b):(score?.a===b&&score?.b===a);
       });
       if(possibleDuplicate&&!confirm('A match with the same opponent and score was recorded recently. Is this a NEW match?'))return;
       const actionId=uid();await saveOutbox({id:actionId,uid:state.user.uid,kind:'submitMatch',payload:{groupId:state.groupId,actionId,opponentUid:d.opponentUid,scoreSelf:a,scoreOpponent:b,note:d.note}});
-      go('matches');
+      state.matchTab='sent';go('matches');
     }else if(form.id==='scoreForm'){
       const t=state.tickets.find(v=>v.id===state.dialog?.ticketId);
       if(!t)throw Error('Match not found.');
@@ -489,6 +649,8 @@ document.addEventListener('submit',async e=>{
       else await act('requestCancel',t,{note:d.note});
     }
   }catch(error){if(form.id==='authForm'&&!state.user)showAuthError(authErrorText(error));else{console.error(error);toast(errText(error));}}
-  finally{if(form.id==='authForm'){state.authBusy=false;if(state.user||state.authMode==='resetSent'){render();document.getElementById('authTitle')?.focus?.();}else document.querySelectorAll?.('.onboarding button, .onboarding input').forEach(el=>el.disabled=false);}if(submit?.isConnected)submit.disabled=false;}
+  finally{if(picker)picker.disabled=false;if(form.id==='authForm'){state.authBusy=false;if(state.user||state.authMode==='resetSent'){render();focusAuthTitle();}else document.querySelectorAll?.('.onboarding button, .onboarding input').forEach(el=>el.disabled=false);}if(submit?.isConnected)submit.disabled=false;}
 });
+let displayedSeason=JSON.stringify(periodKeys(new Date()));
+setInterval(()=>{const next=JSON.stringify(periodKeys(new Date()));if(next!==displayedSeason){displayedSeason=next;render();}},30000);
 start();

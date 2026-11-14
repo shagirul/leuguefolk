@@ -1,15 +1,49 @@
 {
+  "name": "Leaguefolk",
+  "short_name": "Leaguefolk",
+  "description": "Your office league. Verified matches, rivalries and achievement stones.",
   "id": "/",
-  "name": "Agree · Group Leaderboard",
-  "short_name": "Agree",
-  "description": "Match scores are official only when both players agree.",
   "start_url": "/",
   "scope": "/",
   "display": "standalone",
-  "background_color": "#f8f8fc",
-  "theme_color": "#6042de",
+  "background_color": "#fcfaff",
+  "theme_color": "#fcfaff",
   "icons": [
-    { "src": "/icons/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any maskable" },
-    { "src": "/icons/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any maskable" }
+    {
+      "src": "/icons/icon-192x192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/icons/icon-512x512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/icons/icon-maskable-192x192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "maskable"
+    },
+    {
+      "src": "/icons/icon-maskable-512x512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "maskable"
+    },
+    {
+      "src": "/icons/icon-monochrome-192x192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "monochrome"
+    },
+    {
+      "src": "/icons/icon-monochrome-512x512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "monochrome"
+    }
   ]
 }

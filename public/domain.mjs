@@ -44,7 +44,7 @@ function advance(t, kind, actor, input, now) {
       ensureOpen(); revision(t,input.expectedRevision);
       if(t.playerA!==actor||t.revision!==1||t.proposal.by!==actor) fail('Only the reporter can withdraw an untouched original submission.');
       Object.assign(next,{status:'cancelled',turn:null,cancellation:null});
-      title='Submission withdrawn';body='The original report was withdrawn before you responded. No XP awarded.';break;
+      title='Submission withdrawn';body='The original report was withdrawn before you responded. No league points awarded.';break;
     }
     case 'requestCancel':{
       ensureOpen(); revision(t,input.expectedRevision);
@@ -55,7 +55,7 @@ function advance(t, kind, actor, input, now) {
       if(t.status!=='open'||!t.cancellation) fail('There is no active cancellation request.');
       revision(t,input.expectedRevision);
       if(t.cancellation.turn!==actor) fail('Only the other player can respond to cancellation.');
-      if(input.accept===true){ Object.assign(next,{status:'cancelled',turn:null,cancellation:null}); title='Match cancelled'; body='Both players agreed to cancel. No XP awarded.'; }
+      if(input.accept===true){ Object.assign(next,{status:'cancelled',turn:null,cancellation:null}); title='Match cancelled'; body='Both players agreed to cancel. No league points awarded.'; }
       else if(input.accept===false){ next.cancellation=null; title='Cancellation declined'; body='The match remains open. Discuss the score.'; }
       else fail('Choose accept or decline.','invalid-argument');
       break;
@@ -103,4 +103,25 @@ function periodKeys(date,zone='Asia/Kolkata'){
   return {monthKey:`${parts.year}-${parts.month}`,weekKey:t.toISOString().slice(0,10)};
 }
 function scorePoints(score){return score*2;}
-export {advance,periodKeys,scorePoints,validScore,note,other,fail};
+// Competition points come from wins, never from the number of rallies scored.
+function competitionPoints(t,uid){
+  if(t?.status!=='finalized'||!t.finalScore)return 0;
+  return (uid===t.playerA&&t.finalScore.a>t.finalScore.b)||(uid===t.playerB&&t.finalScore.b>t.finalScore.a)?3:0;
+}
+function competitionStandings(members,tickets,period='weekly',now=new Date()){
+  const key=period==='monthly'?'monthKey':'weekKey',season=periodKeys(now)[key];
+  const rows=new Map(members.map(m=>[m.id,{id:m.id,name:m.displayName||'Player',score:0,played:0,wins:0,losses:0,draws:0}]));
+  for(const t of tickets){
+    const at=t.createdAt?.toDate?.()||new Date(t.createdAt||0);
+    if(t.status!=='finalized'||!t.finalScore||!Number.isFinite(+at)||periodKeys(at)[key]!==season)continue;
+    for(const id of [t.playerA,t.playerB]){
+      const row=rows.get(id);if(!row)continue;
+      const points=competitionPoints(t,id),draw=t.finalScore.a===t.finalScore.b;
+      row.score+=points;row.played++;row.wins+=points===3?1:0;row.draws+=draw?1:0;row.losses+=!points&&!draw?1:0;
+    }
+  }
+  const sorted=[...rows.values()].sort((a,b)=>b.score-a.score||a.name.localeCompare(b.name)||a.id.localeCompare(b.id));
+  sorted.forEach((row,i)=>{row.rank=i&&row.score===sorted[i-1].score?sorted[i-1].rank:i+1;});
+  return sorted;
+}
+export {advance,periodKeys,scorePoints,competitionPoints,competitionStandings,validScore,note,other,fail};

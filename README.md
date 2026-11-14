@@ -25,9 +25,17 @@ For local UI development, run `npm run serve` and open **http://localhost:5000**
 
 ## Onboarding and password recovery
 
-Email sign-up asks for a unique username. Google users and existing accounts without a reserved username choose one after signing in. Names use 3–24 letters, numbers or underscores and are unique regardless of capitalization. A transaction reserves `usernames/{lowercaseName}` together with the user's profile; Security Rules prevent duplicate claims and later username changes. Existing group name snapshots refresh after onboarding.
+Email sign-up starts with email and password. After either email or Google sign-in, new users choose their unique username and a character on a dedicated onboarding screen. The animated arc carousel supports swiping, tapping a neighboring character, arrow buttons, and keyboard arrow/Home/End keys. Existing accounts without a reserved username also complete this step. Names use 3–24 letters, numbers or underscores and are unique regardless of capitalization. A transaction reserves `usernames/{lowercaseName}` together with the user's profile; Security Rules prevent duplicate claims and later username changes. Existing group name snapshots refresh after onboarding.
+
+The character catalog now uses the 16 Underdog Heroes v3 assets and their supplied names and descriptions. Both character pickers show a bold name and quoted description; the Profile character badge opens the same description for 4.5 seconds before fading away. Existing players with a retired animal ID choose a new hero on their next visit, keeping their username and match history. Character selection is a preference, with no effect on scores or achievements.
 
 On the email sign-in screen, **Forgot password?** sends a reset email using Firebase Authentication. The link opens Firebase's hosted password-reset page. The confirmation is the same for registered and unregistered addresses; check the inbox and spam folder. The default Firebase reset template works without a custom email service. Customize it later in Authentication → Templates → Password reset if needed.
+
+## Profile and achievements
+
+The Profile page shows matches won, matches played, and win rate for the active group, using all its verified results. Pending reports and cancelled matches do not count. Existing profile levels use 100 cosmetic XP each, with XP equal to twice the player’s agreed score. Cosmetic XP never determines competition rankings. A pending amendment keeps the existing verified score until both players accept the change.
+
+My stats shows recent form, best win streak, average score, losses, and draws. Achievements are derived from verified match milestones; they do not create extra XP or a separate currency. Account settings, group invitations, and the animated character picker remain accessible from the profile.
 
 ## Security and transactions
 
@@ -40,7 +48,7 @@ On the email sign-in screen, **Forgot password?** sends a reset email using Fire
 
 ## Rankings
 
-A verified **21–17** score awards **42 XP** and **34 XP**. Rankings derive from finalized tickets, not a mutable XP balance. Weekly/monthly seasons use immutable, server-timestamped createdAt in **Asia/Kolkata**, with weeks starting Monday. Late confirmation or mutually approved amendments may change previous periods. Pending/cancelled matches do not count.
+A verified win awards **3 competition points** to the winner and **0** to the loser. A drawn score awards **0** to both. All matches are ranked, with no pair limit or casual mode. Equal points share a rank; names only stabilize the display order. Rankings derive from finalized tickets, not a mutable points balance. Weekly/monthly seasons use immutable, server-timestamped createdAt in **Asia/Kolkata**, with weeks starting Monday. Late confirmation or mutually approved amendments may change previous periods. Pending/cancelled matches do not count.
 
 The browser observes the group's tickets in real time and computes totals locally. This suits small friend groups; large histories need pagination and a different aggregation design to stay within read quotas. Bilateral agreement does not prevent collusion or exaggerated scores.
 
@@ -54,6 +62,18 @@ In-app notifications use the canonical /g/{groupId}/t/{ticketId} link and are re
 
 ## Verification and files
 
+Shared invitations use `/invite/CODE` and survive authentication, profile setup and reloads until Join or Decline. The join card shows up to 20 players from a rule-validated, limited preview; private match/profile access still requires membership. Group tiles show up to three actual member avatars and have an independent share button.
+
+Before releasing these invitation changes, deploy the new `players` index, review a backfill dry run, deploy rules, apply the backfill, then deploy hosting. Existing groups must be backfilled before new clients can confirm scores. With Application Default Credentials configured:
+
+```powershell
+npm run invites:backfill -- --project leaguefolk-2b1c2
+# Apply only after reviewing the dry run and deploying the new rules:
+npm run invites:backfill -- --project leaguefolk-2b1c2 --write
+```
+
+See [the schema and rollout contract](docs/SCHEMA.md) for access rules and migration details. No production migration is run automatically.
+
 - `npm test`: domain transitions, Google/email auth behavior, leaderboard calculations and queue/deployment contracts.
 - `npm run test:rules`: Authentication/Firestore emulators under demo-agree, with all match transitions, replay/concurrency and forged-batch attacks that bypass client validation. Requires Java 21+.
 - tests/browser-smoke.py: optional UI fixture test requiring Python Playwright and Chromium.
@@ -65,3 +85,7 @@ In-app notifications use the canonical /g/{groupId}/t/{ticketId} link and are re
 - functions/: legacy, inactive implementation retained for reference. It is absent from deployment configuration. Do not deploy it against the new data contract without migration.
 
 Manual acceptance: use two accounts in separate browsers; create a group, join using its code, submit and confirm a match from the other account. Both rankings and the inbox should update. Test corrections/cancellations and a stale offline confirmation after the other player changes the match.
+
+## Phase 1 acceptance
+
+See [the completed technical acceptance report](docs/PHASE1_ACCEPTANCE.md). `npm run test:rules` includes a real three-player emulator workflow and the actual IndexedDB outbox. All matches are ranked with no weekly match limit, per the revised product decision. No account deletion, Firestore reset or points backfill is necessary: standings recalculate from verified match history. The four-week coworker pilot remains a real-world follow-up.

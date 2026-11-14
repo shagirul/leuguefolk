@@ -1,8 +1,10 @@
 import {advance,validScore,note,fail} from './domain.mjs';
+import {validAvatar,DEFAULT_AVATAR_ID} from './avatars.mjs';
+import {verifiedContribution} from './invites.mjs';
 
 // The browser coordinates atomic writes; Firestore Rules independently authorize every field.
 // Inject the SDK so the same implementation can be exercised against the local emulators.
-export function createFirestoreApi(store,auth,{doc,runTransaction,serverTimestamp,getDocs,collection,updateDoc}){
+export function createFirestoreApi(store,auth,{doc,runTransaction,serverTimestamp,increment,getDocs,collection}){
   const id=value=>{if(typeof value!=='string'||!(/^[a-f\d-]{36}$/i).test(value))fail('Invalid action or group ID.','invalid-argument');return value;};
   const text=(value,min,max)=>{if(typeof value!=='string'||value.trim().length<min||value.trim().length>max)fail(`Enter ${min}–${max} characters.`,'invalid-argument');return value.trim();};
   const ref=(...parts)=>doc(store,...parts);
@@ -12,22 +14,31 @@ export function createFirestoreApi(store,auth,{doc,runTransaction,serverTimestam
   const membership=(uid,gid)=>ref('users',uid,'memberships',gid);
   const ticket=(gid,tid)=>ref('groups',gid,'tickets',tid);
   const operation=(gid,aid)=>ref('groups',gid,'operations',aid);
+  const preview=(code,uid)=>ref('inviteCodes',code,'players',uid);
+  const previewSeed=(own,now)=>({displayName:own.displayName,avatarId:own.avatarId||DEFAULT_AVATAR_ID,xp:0,played:0,wins:0,lastTicketId:null,lastActionId:null,updatedAt:now});
   async function saveProfile(data,uid){
     const displayName=text(data.displayName,3,24);
     if(!/^[A-Za-z0-9_]{3,24}$/.test(displayName))fail('Use 3–24 letters, numbers or underscores for your username.','invalid-argument');
     const username=displayName.toLowerCase();
+    if(data.avatarId!==undefined&&!validAvatar(data.avatarId))fail('Choose a character from the tray.','invalid-argument');
     const result=await runTransaction(store,async tx=>{
       const [own,reserved]=await Promise.all([tx.get(profile(uid)),tx.get(ref('usernames',username))]);
       if(own.exists()&&own.data().username&&own.data().username!==username)fail('Your username cannot be changed after onboarding.');
       if(reserved.exists()&&reserved.data().uid!==uid)fail('That username is already taken. Please choose another.','already-exists');
       const now=serverTimestamp();
+      const avatarId=data.avatarId||(validAvatar(own.data()?.avatarId)?own.data().avatarId:DEFAULT_AVATAR_ID);
       if(!reserved.exists())tx.set(ref('usernames',username),{uid,createdAt:now});
-      tx.set(profile(uid),{displayName,username,updatedAt:now,...(!own.exists()?{createdAt:now}:{})},{merge:true});
-      return {displayName,username};
+      tx.set(profile(uid),{displayName,username,avatarId,updatedAt:now,...(!own.exists()?{createdAt:now}:{})},{merge:true});
+      return {displayName,username,avatarId};
     });
-    // Existing groups keep name snapshots; refresh only this member's name after onboarding.
+    // Refresh this player's name and character snapshots without changing group statistics.
     const groups=await getDocs(collection(store,'users',uid,'memberships'));
-    await Promise.all(groups.docs.map(g=>updateDoc(member(g.id,uid),{displayName})));
+    await Promise.all(groups.docs.map(g=>runTransaction(store,async tx=>{
+      const info=await tx.get(group(g.id));
+      const card=info.exists()?await tx.get(preview(info.data().inviteCode,uid)):null;
+      tx.set(member(g.id,uid),{displayName,avatarId:result.avatarId},{merge:true});
+      if(card?.exists())tx.set(preview(info.data().inviteCode,uid),{displayName,avatarId:result.avatarId,updatedAt:serverTimestamp()},{merge:true});
+    })));
     return result;
   }
   function writeAction(tx,gid,tid,aid,actor,kind,t,event,target){
@@ -49,13 +60,14 @@ export function createFirestoreApi(store,auth,{doc,runTransaction,serverTimestam
       try{return await runTransaction(store,async tx=>{
         const [g,invite,own]=await Promise.all([tx.get(group(gid)),tx.get(ref('inviteCodes',code)),tx.get(profile(uid))]);
         if(g.exists()){if(g.data().creatorUid!==uid)fail('Group ID already used.','already-exists');return {groupId:gid,code:g.data().inviteCode,replayed:true};}
-        if(!own.exists())fail('Set up your profile first.');
+        if(!own.exists()||!validAvatar(own.data().avatarId))fail('Choose your character first.');
         if(invite.exists())fail('Invite code collision.','already-exists');
         const now=serverTimestamp();
         tx.set(group(gid),{name,creatorUid:uid,inviteCode:code,createdAt:now,timeZone:'Asia/Kolkata'});
         tx.set(ref('inviteCodes',code),{groupId:gid,name,createdAt:now});
-        tx.set(member(gid,uid),{displayName:own.data().displayName,joinedAt:now,inviteCode:code});
+        tx.set(member(gid,uid),{displayName:own.data().displayName,avatarId:own.data().avatarId||DEFAULT_AVATAR_ID,joinedAt:now,inviteCode:code});
         tx.set(membership(uid,gid),{groupId:gid,name,joinedAt:now});
+        tx.set(preview(code,uid),previewSeed(own.data(),now));
         return {groupId:gid,code};
       });}catch(e){if(e.code==='already-exists'&&e.message==='Invite code collision.')continue;throw e;}
     }
@@ -67,12 +79,13 @@ export function createFirestoreApi(store,auth,{doc,runTransaction,serverTimestam
     return runTransaction(store,async tx=>{
       const [index,own]=await Promise.all([tx.get(ref('inviteCodes',code)),tx.get(profile(uid))]);
       if(!index.exists())fail('Invite code not found.','not-found');
-      if(!own.exists())fail('Set up your profile first.');
+      if(!own.exists()||!validAvatar(own.data().avatarId))fail('Choose your character first.');
       const {groupId:gid,name}=index.data();
       const [m,ownMembership]=await Promise.all([tx.get(member(gid,uid)),tx.get(membership(uid,gid))]);
       const now=serverTimestamp();
-      if(!m.exists())tx.set(member(gid,uid),{displayName:own.data().displayName,joinedAt:now,inviteCode:code});
+      if(!m.exists())tx.set(member(gid,uid),{displayName:own.data().displayName,avatarId:own.data().avatarId||DEFAULT_AVATAR_ID,joinedAt:now,inviteCode:code});
       if(!ownMembership.exists())tx.set(membership(uid,gid),{groupId:gid,name,joinedAt:m.exists()?m.data().joinedAt:now});
+      if(!m.exists())tx.set(preview(code,uid),previewSeed(own.data(),now));
       return {groupId:gid,name};
     });
   }
@@ -110,6 +123,16 @@ export function createFirestoreApi(store,auth,{doc,runTransaction,serverTimestam
       const now=serverTimestamp();
       const {next,event,target}=advance(t,kind,uid,data,now);
       next.version=t.version+1;next.action={id:aid,kind,actor:uid};
+      const before=[t.playerA,t.playerB].map(player=>verifiedContribution(t,player)),after=[t.playerA,t.playerB].map(player=>verifiedContribution(next,player));
+      if(JSON.stringify(before)!==JSON.stringify(after)){
+        const info=await tx.get(group(gid)),code=info.data()?.inviteCode;
+        // Server increments compose correctly when different matches finish simultaneously.
+        // Rules still check every delta against this exact old/new verified ticket.
+        [t.playerA,t.playerB].forEach((player,i)=>{
+          const delta=Object.fromEntries(['xp','played','wins'].map(key=>[key,increment(after[i][key]-before[i][key])]));
+          tx.update(preview(code,player),{...delta,lastTicketId:tid,lastActionId:aid,updatedAt:now});
+        });
+      }
       writeAction(tx,gid,tid,aid,uid,kind,next,event,target);
       return {ticketId:tid,status:next.status};
     });

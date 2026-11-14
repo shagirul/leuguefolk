@@ -2,23 +2,34 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
-  <meta name="theme-color" content="#6042de" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, interactive-widget=resizes-content" />
+  <meta name="theme-color" content="#fcfaff" />
   <meta name="description" content="A group leaderboard where scores count only after both players agree." />
   <meta name="mobile-web-app-capable" content="yes" />
   <meta name="apple-mobile-web-app-capable" content="yes" />
   <meta name="apple-mobile-web-app-status-bar-style" content="default" />
-  <meta name="apple-mobile-web-app-title" content="Agree" />
+  <meta name="apple-mobile-web-app-title" content="Leaguefolk" />
   <link rel="manifest" href="/manifest.webmanifest" />
-  <link rel="icon" href="/icons/icon-192.png" />
-  <link rel="apple-touch-icon" href="/icons/icon-192.png" />
+  <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+  <link rel="icon" type="image/png" sizes="32x32" href="/favicon-32x32.png" />
+  <link rel="icon" type="image/png" sizes="16x16" href="/favicon-16x16.png" />
+  <link rel="shortcut icon" href="/favicon.ico" />
+  <link rel="mask-icon" href="/safari-pinned-tab.svg" color="#4026b4" />
+  <link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png" />
   <link rel="stylesheet" href="/styles.css" />
-  <title>Agree — Match leaderboard</title>
+  <link rel="stylesheet" href="/avatars.css" />
+  <link rel="stylesheet" href="/account.css" />
+  <link rel="stylesheet" href="/leaderboard.css" />
+  <link rel="stylesheet" href="/invites.css" />
+  <link rel="stylesheet" href="/record-match.css" />
+  <link rel="stylesheet" href="/activity.css" />
+  <link rel="stylesheet" href="/matchups.css" />
+  <title>Leaguefolk — Office league</title>
   <script src="/firebase-config.js"></script>
   <script type="module" src="/app.js"></script>
 </head>
 <body>
-  <div id="app"><div class="loading"><div class="logo-mark">A</div><h1>Agree</h1><p>Loading your leaderboard…</p></div></div>
+  <div id="app"><div class="loading"><img class="logo-mark" src="/icons/icon-192x192.png" width="66" height="66" alt="" /><h1>Leaguefolk</h1><p>Loading your leaderboard…</p></div></div>
   <div id="toast" class="toast" role="status" aria-live="polite" aria-atomic="true"></div>
 </body>
 </html>

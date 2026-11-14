@@ -12,7 +12,7 @@
     ],
     "headers": [
       {
-        "source": "/{firestore-api,domain}.mjs",
+        "source": "/{firestore-api,domain,outbox,record-match,activity,bulk-accept,matchups,achievements,avatars,characters,account,leaderboard,invites}.mjs",
         "headers": [{ "key": "Cache-Control", "value": "no-cache" }]
       },
       {
@@ -65,7 +65,7 @@
         ]
       },
       {
-        "source": "/styles.css",
+        "source": "/{styles,record-match,activity,matchups,achievements,avatars,account,leaderboard,invites}.css",
         "headers": [
           {
             "key": "Cache-Control",

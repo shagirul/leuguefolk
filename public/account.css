@@ -1,0 +1,198 @@
+/* Leaguefolk account: the same navy, lavender and 44px controls as onboarding. */
+.account-page,.account-dialog{--purple:#4026b4;--purple-dark:#341c9d;--auth-control-height:44px;color:#080c44}
+.account-page{position:relative;isolation:isolate;min-height:100dvh;background:#fcfaff;padding-bottom:calc(102px + env(safe-area-inset-bottom));overflow:clip}
+.account-page:before{content:'';position:absolute;right:-160px;top:-210px;width:340px;height:340px;border-radius:50%;background:#ece6ff;z-index:-1;pointer-events:none}
+.account-top{display:flex;align-items:center;justify-content:space-between;gap:10px;max-width:580px;margin:auto;padding:calc(8px + env(safe-area-inset-top)) 24px 8px}
+.account-top h1{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:16px;font-weight:700;letter-spacing:-.25px;margin:0 auto 0 0;color:#080c44}
+.account-icon-button{height:44px;width:44px;display:grid;place-items:center;padding:0;background:#eee7fb;border:0;border-radius:50%;color:#443368}
+.league-header-actions{display:flex;align-items:center;justify-content:flex-end;gap:4px;min-width:0;max-width:62%;margin-left:auto}
+.league-header.has-settings .league-header-actions{max-width:74%}
+.league-group-picker{display:grid;place-items:center;flex-shrink:0;width:44px;height:44px;padding:4px;border:1px solid #d5c5ec;border-radius:50%;background:#fff;transition:border-color .15s}
+.league-group-picker:hover{border-color:#9c80d3}
+.league-group-picker:hover .league-group-symbol{background:#341c9d}
+.league-group-symbol{display:grid;place-items:center;flex-shrink:0;width:34px;height:34px;border-radius:50%;background:#6040b0;color:#fff;font-size:11px;font-weight:800;line-height:1;letter-spacing:.2px;transition:background .15s}
+.league-header .account-icon-button{flex-shrink:0;background:none;color:#796588}.league-header .account-icon-button svg{width:20px;height:20px}.league-header-back{margin-left:-10px;margin-right:-5px}.league-header-back svg{transform:rotate(180deg)}
+.league-header button:focus-visible{outline:3px solid #b59bdc;outline-offset:3px}
+.shell>.league-header{position:sticky;top:0;z-index:5;background:transparent;border:0}
+.league-group-options{display:grid;gap:8px;margin:20px 0}
+.league-group-row{display:flex;align-items:center;gap:4px;min-width:0;border:1px solid #e7def0;border-radius:17px;background:#fff;color:#786189}
+.league-group-row.is-selected{border-color:#d1bde9;background:#f0e7fa;color:#5c368a}
+.league-group-option{display:flex;align-items:center;gap:12px;flex:1;min-width:0;min-height:68px;padding:12px;border:0;border-radius:17px;background:none;color:inherit;text-align:left}
+.league-group-option>strong{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:13px;font-weight:650}
+.league-group-avatars{display:flex;align-items:center;flex-shrink:0;min-width:34px;padding-left:0;color:#9879b5}.league-group-avatars>svg{width:26px;height:26px}
+.league-group-avatars>.avatar{position:relative;width:34px;height:34px;border:2px solid #fff;background:#e6dcf4;margin-left:-11px}.league-group-avatars>.avatar:first-child{margin-left:0}.league-group-avatars>.avatar:nth-child(2){z-index:1}.league-group-avatars>.avatar:nth-child(3){z-index:2}.league-group-avatars .character-art{transform:scale(1.35);transform-origin:50% 60%}
+.league-group-share{display:grid;place-items:center;flex-shrink:0;width:44px;height:44px;margin-right:8px;padding:0;border:0;border-radius:13px;background:#f5f0fa;color:#76519e}.league-group-share svg{width:19px;height:19px}.is-selected .league-group-share{background:#e5d7f5;color:#6c4299}.league-group-share:hover{background:#ddccec}
+.account-body{width:100%;max-width:580px;margin:0 auto;padding:0 24px}
+.account-hero{--profile-card-size:112px;display:grid;grid-template-columns:var(--profile-card-size) minmax(0,1fr);align-items:end;gap:20px;padding-top:12px;margin-bottom:22px}
+/* Reserve only the painted head height; the square card still sits at the bottom. */
+.account-character{position:relative;display:block;width:var(--profile-card-size);height:max(var(--profile-card-size),calc((var(--profile-card-size) - 4px)*var(--profile-art-ratio) + 2px));padding:0;border:0;background:none;text-align:initial;isolation:isolate}
+.character-card{position:relative;display:block;width:100%;height:100%;aspect-ratio:1}
+.account-character .character-card{position:absolute;left:0;bottom:0;width:var(--profile-card-size);height:var(--profile-card-size)}
+.account-character .character-tile{border-color:#c9b8f1;background:linear-gradient(145deg,#e2d5ff,#bfa9eb);box-shadow:0 12px 24px #4026b417}
+.account-character .character-figure{clip-path:inset(-200% 0 0 round 22px)}
+.account-avatar-edit{position:absolute;right:-5px;bottom:-5px;z-index:4;display:grid;place-items:center;width:28px;height:28px;border:3px solid #fcfaff;border-radius:50%;background:#4026b4;color:white}
+.account-avatar-edit svg{width:13px;height:13px}
+.account-identity{min-width:0}
+.account-identity h2{font-size:clamp(25px,7.7vw,34px);font-weight:800;line-height:1.1;letter-spacing:-1.2px;margin:0 0 3px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.account-character-meta{position:relative;min-width:0}
+.account-character-badge{display:inline-flex;align-items:center;max-width:100%;min-height:44px;padding:8px 0;border:0;background:none;color:#78648e;text-align:left}
+.account-character-badge-surface{display:inline-flex;align-items:center;gap:8px;min-width:0;min-height:28px;padding:4px 9px;border-radius:8px;background:#eee7f7;font-size:10px;font-weight:650}.account-character-badge-surface>span{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.account-character-badge svg{width:13px;height:13px;flex-shrink:0;color:#8d73a8}
+.account-character-tooltip{position:absolute;z-index:15;top:calc(100% + 6px);right:0;width:230px;max-width:calc(100vw - 48px);padding:12px 14px;border:1px solid #ded0ef;border-radius:14px;background:#fffafd;color:#6e537e;box-shadow:0 8px 26px #4026b41c;font-size:12px;font-style:italic;line-height:1.6;animation:character-info-in .18s ease both}
+.account-character-tooltip[hidden]{display:none}.account-character-tooltip.is-leaving{animation:character-info-out .18s ease both}
+@keyframes character-info-in{from{opacity:0;transform:translateY(-4px)}to{opacity:1;transform:translateY(0)}}@keyframes character-info-out{to{opacity:0;transform:translateY(-4px)}}
+.account-level-meta{display:flex;justify-content:space-between;gap:8px;align-items:baseline;margin:4px 0 7px;font-size:12px}
+.account-level-meta strong{font-weight:750}.account-level-meta>span{font-size:10px;color:#94869f}
+.account-progress{height:8px;border-radius:999px;background:#e9e2f0;overflow:hidden}
+.account-progress>span{display:block;height:100%;background:linear-gradient(90deg,#8059dc,#4026b4);border-radius:inherit;transition:width .35s ease}
+.account-progress-caption{font-size:10px;line-height:1.4;margin:7px 0 0;color:#9b8ca9}
+.account-highlights{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:9px}
+.account-highlight{display:flex;align-items:center;gap:7px;min-width:0}
+.account-highlight>span{display:grid;place-items:center;flex:none;height:30px;width:30px;border-radius:10px;color:#6a46bf;background:#eee5fc}
+.account-highlight>span svg{height:21px;width:21px}
+.account-highlight>div{display:flex;flex-direction:column;gap:4px;min-width:0}
+.account-highlight strong{font-size:23px;line-height:1;font-weight:800;letter-spacing:-.8px}
+.account-highlight small{font-size:10px;line-height:1.4;color:#95869f}
+.account-scope{font-size:10px;color:#a598b0;margin:20px 0 0;line-height:1.5}
+.account-tabs{display:flex;gap:28px;border-bottom:1px solid #e8e0ee;margin:20px -24px 24px;padding:0 24px}
+.account-tabs button{position:relative;min-height:48px;padding:0 0 12px;border:0;background:none;color:#9b90aa;font-size:14px;font-weight:700}
+.account-tabs button[aria-selected="true"]{color:#211346}
+.account-tabs button[aria-selected="true"]:after{content:'';position:absolute;bottom:-1px;left:0;right:0;height:3px;border-radius:3px;background:#6840c5}
+.account-level-rail{display:flex;align-items:center;gap:18px;padding:19px 18px;border-radius:23px;background:linear-gradient(120deg,#8056dc,#4b28ad 62%,#341480);color:#fff;box-shadow:0 9px 23px #4026b415}
+.account-current-level{display:flex;flex-direction:column;flex:0 0 86px;gap:5px;position:relative}
+.account-level-gem{display:block;position:absolute;top:0;left:0;transform:rotate(-10deg);opacity:.13}
+.account-level-gem svg{height:70px;width:70px}
+.account-current-level strong{font-size:20px;font-style:italic;font-weight:850;line-height:1.2;z-index:1;letter-spacing:-.7px}
+.account-current-level small{font-size:9px;color:#e1d5fa;z-index:1}
+.account-level-steps{display:flex;gap:12px;overflow-x:auto;overscroll-behavior-x:contain;min-width:0;padding:2px 0 3px;scrollbar-width:thin;scrollbar-color:#b996f0 transparent}
+.account-level-step{display:flex;flex-direction:column;align-items:center;gap:7px;flex:0 0 40px;opacity:.4}
+.account-level-step>span{font-size:10px;font-weight:750}.account-level-step>svg{width:30px;height:30px;fill:#baa1ec33}.account-level-step>small{font-size:8px;white-space:nowrap}
+.account-level-step.is-current{opacity:1}.account-level-step.is-current>svg{fill:#c39bf2;stroke:#eee3ff;filter:drop-shadow(0 2px 5px #24103c44)}
+.account-section-heading{display:flex;align-items:center;justify-content:space-between;gap:12px;margin:27px 0 17px}
+.account-section-heading h3{font-size:15px;letter-spacing:-.3px;margin:0;font-weight:750}
+.account-section-heading>span{font-size:10px;color:#a193ac;white-space:nowrap}
+.account-achievements{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px}
+.account-achievement{display:flex;flex-direction:column;align-items:center;gap:7px;min-width:0;min-height:124px;padding:16px 5px 12px;background:#f5f1fa;border:1px solid #e9e1f3;border-radius:18px;color:#a69ab5}
+.account-achievement.is-unlocked{background:#f0e7fd;border-color:#e0d0f5;color:#6340ab}
+.account-achievement-icon{position:relative;display:grid;place-items:center;height:40px;width:40px;border-radius:14px;background:#eee7f5;color:#baadca}
+.is-unlocked .account-achievement-icon{background:#e6d7fb;color:#7047c3}
+.account-achievement-icon>svg{height:25px;width:25px}
+.account-achievement-icon>i{position:absolute;bottom:-3px;right:-4px;border-radius:50%;padding:3px;display:grid;place-items:center;background:#f5f1fa}
+.account-achievement-icon>i svg{height:9px;width:9px}.is-unlocked .account-achievement-icon>i{color:#fff;background:#7050bb}
+.account-achievement strong{font-size:10px;line-height:1.4;text-align:center;font-weight:700}.account-achievement small{font-size:9px;color:#ac9cba}
+.account-form-results{display:flex;gap:10px;margin-bottom:20px}
+.account-result{flex:1;display:flex;flex-direction:column;align-items:center;gap:7px;padding:12px 2px;background:#eee7f9;border-radius:13px;color:#6b4aa1}
+.account-result strong{font-size:16px}.account-result small{font-size:9px;color:#8d7a9e}.account-result.result-l{background:#f0ebf1;color:#a18ca4}.account-result.result-d{background:#f3eeda;color:#97804b}
+.account-detail-stats{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+.account-detail-stats>div{display:flex;flex-direction:column;gap:10px;padding:16px;border-radius:16px;background:#f4f0f9;border:1px solid #eae2f1}
+.account-detail-stats span{font-size:11px;color:#9986a7}.account-detail-stats strong{font-size:23px;font-weight:750}
+.account-empty{font-size:12px;line-height:1.6;color:#a394ac;text-align:center;padding:20px 8px}
+.account-group-row{display:flex;align-items:center;gap:12px;width:100%;text-align:left;padding:15px;margin-top:27px;border:1px solid #e7def2;border-radius:17px;background:#ffffff80;color:#392255}
+.account-group-icon{display:grid;place-items:center;height:37px;width:37px;background:#eee6f9;border-radius:12px;color:#8f72b5}
+.account-group-row>span:nth-child(2){display:flex;flex:1;flex-direction:column;gap:5px;min-width:0}.account-group-row strong{font-size:12px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.account-group-row small{font-size:10px;color:#a796b3}.account-group-row>svg{height:16px;width:16px;color:#ac9bb7}
+.account-fine-print{font-size:9px;line-height:1.6;text-align:center;color:#b0a2ba;margin:18px 0 0}
+.account-nav{position:fixed;z-index:10;bottom:0;left:50%;transform:translateX(-50%);display:grid;grid-template-columns:repeat(4,1fr);width:100%;max-width:580px;padding:12px 20px calc(10px + env(safe-area-inset-bottom));background:#fcfaffed;border-top:1px solid #ece4f3;backdrop-filter:blur(15px)}
+.account-nav>button{position:relative;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:6px;min-height:44px;border:0;background:none;color:#b0a3bc;font-size:10px}.account-nav svg{height:21px;width:21px}.account-nav .is-active{color:#6040b0;font-weight:750}.account-nav i{position:absolute;top:0;right:33%;height:6px;width:6px;border-radius:50%;background:#a575df}
+.account-dialog{background:#fcfaff;border-radius:25px!important;overflow-x:hidden}.account-dialog .btn{height:44px;min-height:44px;margin-top:12px;border-radius:999px;font-size:14px}.account-dialog .input{height:44px;min-height:44px;border-radius:999px;background:#fff;border-color:#d8cef4}.account-dialog h2{color:#100b45;font-weight:800}.account-dialog .character-picker{--arc-card-size:128px;--arc-headroom:40px;--arc-radius:330px}.account-dialog .character-direction-hint{margin-top:10px}.account-dialog .copy-code{margin:20px 0}
+.account-character-editor>h2{text-align:center;margin:0 0 8px;font-size:21px;letter-spacing:-.6px}.account-character-editor .character-picker{margin:0;width:100%}.account-character-editor .character-description{max-width:280px}.account-character-editor .character-direction-hint{display:none}.account-character-editor+.btn{margin-top:8px}
+.account-achievement-detail{text-align:center;padding:10px 0}.account-achievement-detail>svg{display:block;margin:0 auto 18px;height:56px;width:56px;color:#af9abf}.account-achievement-detail.is-unlocked>svg{color:#8052c7}.account-achievement-detail h2{margin-bottom:12px}.account-settings-meta{line-height:1.9!important;overflow-wrap:anywhere}
+.account-page button:focus-visible,.account-dialog button:focus-visible{outline:3px solid #b59bdc;outline-offset:4px}
+.account-page button:active{transform:translateY(1px)}
+@media(max-width:350px){.account-top{padding-inline:20px}.account-body{padding-inline:20px}.account-hero{--profile-card-size:96px;gap:16px}.account-identity h2{font-size:25px}.account-highlight{gap:5px}.account-highlight>span{height:25px;width:25px}.account-highlight>span svg{height:18px;width:18px}.account-highlight strong{font-size:21px}.account-highlight small{font-size:9px}.account-tabs{margin-inline:-20px;padding-inline:20px}.account-level-rail{gap:12px;padding:17px 14px}.account-current-level{flex-basis:77px}.account-current-level strong{font-size:18px}.account-achievements{gap:8px}}
+@media(max-width:350px){.league-header{gap:8px}.league-header.has-back{gap:6px}}
+@media(prefers-reduced-motion:reduce){.account-progress>span,.league-group-picker{transition:none}.account-character-tooltip{animation:none}.account-character-tooltip.is-leaving{opacity:0}}
+
+/* Keep small secondary labels readable against the pale account background. */
+.account-highlight small,.account-scope,.account-progress-caption,.account-level-meta>span,.account-section-heading>span,.account-achievement small,.account-fine-print,.account-group-row small{color:#7b6e88}
+.account-achievement{color:#81728f}.account-nav>button{color:#82738f}.account-nav .is-active{color:#6040b0}
+/* Keep the three numbers aligned when a label wraps on a narrow phone. */
+.account-highlight small{min-height:0;white-space:nowrap}
+.account-highlights{gap:8px;align-items:center}
+.account-highlight{gap:6px}
+.account-highlight>img{display:block;width:38px;height:38px;object-fit:contain;flex:none}
+.account-highlight>div{gap:3px}
+.account-highlight strong{font-size:22px;letter-spacing:-.6px;font-variant-numeric:tabular-nums}
+.account-highlight small{font-size:10px;line-height:1.2}
+@media(max-width:350px){.account-highlights{gap:5px}.account-highlight{gap:4px}.account-highlight>img{width:30px;height:30px}.account-highlight strong{font-size:19px}.account-highlight small{font-size:9px}}
+
+.league-header .league-header-notifications{position:relative}.league-header .league-header-notifications:hover,.league-header .league-header-notifications.is-active{background:#eee5fa;color:#6940b3}.league-header-notifications>i{position:absolute;top:9px;right:10px;width:8px;height:8px;border:2px solid #fcfaff;border-radius:50%;background:#8255c9}
+
+.account-group-row{gap:12px;padding:16px 14px;background:#f1eafa;border-color:#e4d7f1}
+.account-group-row>.league-group-avatars{flex:0 0 auto;display:flex}
+.account-group-row>.account-group-copy{display:flex;flex:1;min-width:0;flex-direction:column;gap:5px}
+.account-group-row>.account-group-invite{display:grid;place-items:center;width:36px;height:36px;flex:none;border-radius:11px;background:#e5d9f5;color:#7952ac}
+.account-group-invite svg{width:18px;height:18px}
+.account-sign-out{display:block;min-height:44px;margin:14px auto 8px;padding:0 24px;border:0;background:none;color:#8c6c9a;font-size:12px;font-weight:650}
+.player-profile-link{display:inline-flex;align-items:center;justify-content:center;flex:none;padding:0;border:0;border-radius:50%;background:none;color:inherit;cursor:pointer;line-height:1}
+.player-profile-link:focus-visible{outline:3px solid #b59bdc;outline-offset:3px}
+.account-character.is-readonly{cursor:default}.player-profile-actions{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin:22px 0 12px}.player-profile-actions .btn{font-size:12px;padding-inline:10px}
+.account-hero:has(.is-readonly) .account-identity h2{font-size:26px;white-space:normal;overflow-wrap:anywhere;text-overflow:clip;line-height:1.08}
+
+/* Shared bottom drawers stay attached to the viewport, including on desktop. */
+body:has(.modal-backdrop){overflow:hidden}
+.modal-backdrop{align-items:flex-end;overscroll-behavior:contain}
+.modal-backdrop>.modal{position:relative;max-width:580px;max-height:92dvh;border-radius:25px 25px 0 0!important;padding-top:48px;overscroll-behavior:contain;transform:translateY(var(--drawer-y,0px));transition:transform 180ms ease-out;animation:drawer-enter 220ms cubic-bezier(.22,1,.36,1)}
+.modal-backdrop .modal-handle{position:absolute;inset:0 0 auto;display:grid;place-items:center;width:100%;height:44px;margin:0;padding:0;border:0;border-radius:25px 25px 0 0;background:none;cursor:grab;touch-action:none;user-select:none}
+.modal-handle>span{display:block;width:42px;height:4px;border-radius:10px;background:#d5cce4}
+.modal-backdrop .modal-handle:active{transform:none;cursor:grabbing}
+.modal-backdrop>.modal.is-dragging{animation:none;transition:none}
+.modal-backdrop>.modal.is-closing{animation:none;transform:translateY(100%);pointer-events:none}
+@keyframes drawer-enter{from{transform:translateY(100%)}to{transform:translateY(0)}}
+@media(prefers-reduced-motion:reduce){.modal-backdrop>.modal{animation:none;transition:none}}
+
+/* Pastel achievement stones: a small collection with a clear path to each award. */
+.achievement-heading{margin-bottom:7px}.achievement-intro{margin:0 0 18px;color:#92809f;font-size:11px;line-height:1.6}
+.account-achievements.stone-collection{grid-template-columns:repeat(2,minmax(0,1fr));gap:14px}
+.stone-tile,.stone-detail{--stone-tint:#e9f3ff;--stone-line:#d5e5f8;--stone-ink:#4785bd}
+.stone-untouchable{--stone-tint:#eef5e9;--stone-line:#dceacb;--stone-ink:#668a43}.stone-rival-dominator{--stone-tint:#f0e9fb;--stone-line:#e0d1f4;--stone-ink:#8e5fc1}.stone-three-peat{--stone-tint:#fff5df;--stone-line:#f3e3b9;--stone-ink:#ac812d}.stone-table-conqueror{--stone-tint:#fcebf4;--stone-line:#f1d4e4;--stone-ink:#b25a92}.stone-perfect-reign{--stone-tint:#efedf5;--stone-line:#dedbe9;--stone-ink:#8a829d}
+.account-achievement.stone-tile{position:relative;display:flex;align-items:stretch;gap:0;min-height:218px;padding:15px 12px 13px;border:1px solid var(--stone-line);border-radius:22px;background:linear-gradient(155deg,#ffffffb3,var(--stone-tint));box-shadow:0 4px 0 var(--stone-line),inset 0 1px 0 #fff;color:#221343;transition:transform 160ms,box-shadow 160ms}
+.stone-tile.is-unlocked{border-color:var(--stone-line);background:linear-gradient(155deg,#fff,var(--stone-tint))}
+.stone-tile:hover{transform:translateY(-2px);box-shadow:0 6px 0 var(--stone-line),0 10px 18px #35205b0a}.account-page .stone-tile:active{transform:translateY(3px);box-shadow:0 1px 0 var(--stone-line)}
+.stone-tile-top{display:flex;align-items:flex-start;gap:5px;text-align:left;min-height:41px}
+.stone-tile-top>strong{flex:1;min-width:0;font-size:15px;line-height:1.1;font-weight:900;font-style:italic;letter-spacing:-.5px;text-align:left;color:#251345;text-shadow:0 1px 0 #fff;overflow-wrap:normal}
+.stone-count{display:grid;place-items:center;flex:none;width:28px;height:28px;border-radius:50%;border:2px solid #fff;background:#e9e0f1;box-shadow:0 2px 0 #d9cce7;color:#9b83af;font-size:12px;font-weight:850;font-variant-numeric:tabular-nums}
+.is-unlocked .stone-count,.stone-detail .stone-count{background:#7450be;color:#fff;box-shadow:0 2px 0 #4d2b8d}
+.stone-art{position:relative;display:grid;place-items:center;height:111px;margin:3px -2px 5px}
+.stone-art:before{content:'';position:absolute;width:83px;height:83px;border-radius:50%;background:var(--stone-line);opacity:.45}
+.stone-art>img{position:relative;width:110px;height:110px;object-fit:contain;filter:saturate(.8) drop-shadow(0 6px 5px #24103e0c);transition:transform 180ms}
+.stone-tile:hover .stone-art>img{transform:translateY(-3px) rotate(-3deg)}.stone-tile.is-unlocked .stone-art>img{filter:drop-shadow(0 6px 5px #24103e12)}
+.stone-tile-footer{display:flex;flex-direction:column;gap:9px;margin-top:auto;text-align:left}
+.stone-tile-footer>span:first-child{font-size:10px;color:#8d7a9d;line-height:1.4}
+.stone-discover{display:flex;align-items:center;justify-content:space-between;gap:4px;font-size:10px;font-weight:750;color:var(--stone-ink)}.stone-discover svg{width:10px;height:10px}
+.stone-detail-art{position:relative;display:grid;place-items:center;width:144px;height:144px;margin:0 auto 5px;border-radius:50%;background:radial-gradient(circle,var(--stone-tint),transparent 72%)}
+.stone-detail-art>img{width:140px;height:140px;object-fit:contain;filter:drop-shadow(0 7px 5px #2511420d)}.stone-detail-art>.stone-count{position:absolute;right:4px;top:7px;width:32px;height:32px;font-size:13px}
+.league-dialog .stone-eyebrow{margin:0 0 8px;text-align:center;font-size:8px;letter-spacing:1.5px;font-weight:750;color:var(--stone-ink)}
+.league-dialog .stone-detail>h2{text-align:center;font-size:28px;font-style:italic;line-height:1.1;letter-spacing:-1px;font-weight:900;margin:0 0 9px;color:#251345}
+.league-dialog .stone-description{text-align:center;font-size:12px;font-style:italic;line-height:1.6;color:#9b83ac;margin:0 auto 22px;max-width:280px}
+.stone-path{padding:16px;background:var(--stone-tint);border:1px solid var(--stone-line);border-radius:17px}
+.stone-detail h3{font-size:12px;line-height:1.4;margin:0;font-weight:800;color:#39244f}.league-dialog .stone-path>p{font-size:12px;line-height:1.65;color:#796289;margin:7px 0 0}
+.stone-reset{display:flex;align-items:flex-start;gap:7px;margin-top:12px;font-size:10px;line-height:1.6;color:#997eaa}.stone-reset>svg{width:14px;height:14px;margin-top:2px;flex:none}
+.stone-progress-section{margin-top:22px}.stone-progress-title{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:10px}.stone-progress-title>span{font-size:12px;font-weight:750;color:#8056b3}
+.league-dialog .stone-progress-section>p{font-size:11px;line-height:1.65;color:#927c9f;margin:10px 0}
+.league-dialog .stone-progress-section>.stone-week-note{padding:12px;border-radius:12px;background:#f1ebf8;font-size:10px;color:#8c719f}
+.stone-checklist{list-style:none;margin:14px 0 0;padding:0;display:grid;gap:10px}.stone-checklist li{display:flex;align-items:center;gap:9px;color:#aa99b5;font-size:11px}.stone-checklist li>span:first-child{display:grid;place-items:center;width:22px;height:22px;border-radius:7px;background:#f0eaf6}.stone-checklist svg{width:12px;height:12px}.stone-checklist li>span:nth-child(2){flex:1}.stone-checklist b{font-size:10px;font-weight:600}.stone-checklist .is-met{color:#7a57a3}.stone-checklist .is-met>span:first-child{background:#e7dcf5;color:#7951ae}
+.stone-rivals{display:grid;gap:10px;margin-top:14px}.stone-rivals>div{display:flex;justify-content:space-between;gap:12px;color:#927a9f;font-size:11px}.stone-rivals b{font-size:10px;color:#8056ad}
+.stone-history{margin-top:22px}.stone-history>button,.stone-history>div{display:flex;align-items:center;justify-content:space-between;gap:12px;width:100%;border:0;border-bottom:1px solid #eee7f4;background:none;padding:13px 0;color:#74588b;text-align:left}.stone-history button>span,.stone-history>div{display:grid;gap:5px}.stone-history strong{font-size:11px;font-weight:650}.stone-history small{font-size:9px;color:#ac97ba}.stone-history svg{width:12px;color:#af99bf}
+.league-dialog .stone-verification{display:flex;justify-content:center;align-items:center;gap:5px;font-size:9px;color:#ac96bb;margin:23px 0 0}.stone-verification svg{width:12px;height:12px}
+@media(max-width:350px){.account-achievements.stone-collection{gap:12px}.account-achievement.stone-tile{padding:13px 10px;min-height:213px;border-radius:19px}.stone-tile-top>strong{font-size:14px}.stone-count{width:25px;height:25px;font-size:11px}.stone-tile-top{min-height:45px}.stone-art>img{width:100px;height:100px}.stone-tile-footer>span:first-child{font-size:9px}.stone-discover{font-size:9px}}
+@media(max-width:350px){.stone-untouchable .stone-tile-top>strong{font-size:12.5px}}
+@media(prefers-reduced-motion:reduce){.stone-tile,.stone-art>img{transition:none}.stone-tile:hover,.stone-tile:hover .stone-art>img{transform:none}}
+
+/* The stone itself is the tile; title and count belong to its artwork. */
+.account-achievements.stone-collection{grid-template-columns:repeat(3,minmax(0,1fr));gap:14px 8px;width:100%;max-width:400px;margin:12px auto 0}
+.account-achievement.stone-tile{display:block;width:100%;justify-self:center;min-height:0;aspect-ratio:1;padding:0;border:0;border-radius:0;background:none;box-shadow:none;overflow:visible;transition:transform 160ms}
+.stone-tile.is-unlocked,.stone-tile:hover{background:none;border:0;box-shadow:none}
+.stone-tile:hover{transform:translateY(-3px)}.account-page .stone-tile:active{transform:scale(.96);box-shadow:none}
+.stone-tile .stone-art{position:relative;display:block;width:100%;height:100%;margin:0}
+.stone-tile .stone-art:before{display:none}
+.stone-tile .stone-art>img{position:absolute;z-index:1;left:-3%;top:-9%;width:106%;height:106%;max-width:none;object-fit:contain;filter:drop-shadow(0 6px 3px #2511421a);transform:none}
+.stone-tile:hover .stone-art>img{transform:none}
+.stone-art>.stone-name{position:absolute;z-index:2;bottom:5%;left:0;width:100%;margin:0;text-align:center;font-size:clamp(14px,3.8vw,16px);line-height:.9;font-weight:900;font-style:italic;letter-spacing:-.6px;color:#fff;-webkit-text-stroke:1.25px #4a315f;paint-order:stroke fill;text-shadow:0 1px 0 #4a315f;pointer-events:none}
+.stone-art>.stone-count{position:absolute;z-index:3;top:3%;right:14%;width:23px;height:23px;border:2px solid #fff;font-size:10px;background:#eee5f6;color:#947aa9;box-shadow:0 2px 0 #bba5d0}
+.stone-tile.is-unlocked .stone-count{background:#7450be;color:#fff;box-shadow:0 2px 0 #4d2b8d}
+@media(max-width:350px){.account-achievements.stone-collection{gap:12px 8px}.stone-art>.stone-name{font-size:14px;letter-spacing:-.5px;-webkit-text-stroke-width:1px}.stone-art>.stone-count{width:21px;height:21px;font-size:9px}}
+
+/* Stable app chrome while the content scrolls inside the fixed viewport. */
+.account-page>.account-top{position:sticky;top:0;z-index:8;background:transparent;backdrop-filter:none;border:0;border-radius:0;box-shadow:none;transform:translateY(0);transition:transform 180ms ease-out}
+#app.is-header-hidden .account-page>.account-top{transform:translateY(-110%);pointer-events:none}
+#app.is-header-scrolled .account-page>.account-top{background:#fcfaff}
+@media(prefers-reduced-motion:reduce){.account-page>.account-top{transition:none}}

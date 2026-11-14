@@ -1,0 +1,48 @@
+/* Full-width character artwork floats above a square card on an animated arc. */
+.player-setup{width:100%;padding:0;min-width:0}
+.player-setup .row h1{font-size:20px;overflow-wrap:anywhere}
+.onboarding.is-player{padding:0}
+.is-player .onboarding-body{padding-top:32px}
+.player-heading{text-align:center}
+.auth-panel .player-heading h1{font-size:26px;line-height:1.25;font-weight:800;letter-spacing:-.7px;margin:0 0 24px}
+.player-heading h1 span{color:var(--purple)}
+.is-player .field>label,.character-sr-only{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip-path:inset(50%);white-space:nowrap}
+.character-picker{--arc-card-size:clamp(140px,min(42vw,20vh),190px);--arc-radius:clamp(340px,106vw,540px);--arc-headroom:calc(var(--arc-card-size)*.2 + 20px);min-width:0;max-width:100%;padding:0;border:0;margin:8px 0 20px}
+.character-arc{position:relative;left:50%;transform:translateX(-50%);width:min(100vw,680px);height:calc(var(--arc-card-size) + var(--arc-headroom) + 36px);overflow:clip;touch-action:pan-y;cursor:grab;user-select:none;mask-image:linear-gradient(to right,transparent,#000 7%,#000 93%,transparent)}
+/* Interpolate orbit rotation rather than XY endpoints, so settling also follows the circle. */
+.character-option{position:absolute;left:50%;top:var(--arc-headroom);width:var(--arc-card-size);aspect-ratio:1;cursor:pointer;transform-origin:50% 90%;transform:translate(-50%,var(--arc-radius)) rotate(var(--arc-orbit)) translateY(calc(-1 * var(--arc-radius))) rotate(calc(var(--arc-angle) - var(--arc-orbit))) scale(var(--arc-scale));opacity:var(--arc-opacity);transition:transform 460ms cubic-bezier(.22,1,.36,1),opacity 320ms ease}
+.character-option[data-visible="false"]{visibility:hidden;opacity:0;pointer-events:none}
+.character-option[data-visible="true"]{will-change:transform}
+.character-option input{position:absolute;opacity:0;width:1px;height:1px;top:50%;left:50%}
+.character-tile{display:block;width:100%;height:100%;aspect-ratio:1;position:relative;overflow:hidden;border:2px solid #ded4f3;border-radius:24px;background:#f0eafa;box-shadow:0 10px 24px #3424640d;transition:border-color 240ms,background 240ms,box-shadow 240ms}
+.character-tile:before{content:'';position:absolute;inset:14%;border-radius:50%;background:#e5dbf9}
+.character-art{display:block;width:100%;height:100%;object-fit:contain;user-select:none}
+.character-option:before{content:'';position:absolute;inset:calc(var(--arc-card-size)*-.75) 0 0}
+.character-figure{position:absolute;inset:2px;z-index:2;pointer-events:none;clip-path:inset(-200% 0 0 round 22px)}
+.character-head{position:absolute;inset:2px;z-index:2;pointer-events:none;clip-path:inset(-200% -50% 100% -50%)}
+.character-figure .character-art,.character-head .character-art{position:absolute;width:var(--figure-width);height:auto;max-width:none;left:var(--figure-left);bottom:var(--figure-bottom);filter:drop-shadow(0 5px 4px #22104114);pointer-events:none}
+.character-check{display:none;position:absolute;right:10px;bottom:10px;z-index:3;background:var(--purple);color:white;border-radius:50%;width:22px;height:22px;text-align:center;line-height:22px;font-size:12px;font-weight:800;box-shadow:0 2px 8px #4026b422}
+.character-option input:checked+.character-tile{border-color:var(--purple);background:linear-gradient(145deg,#faf7ff,#e8dffa);box-shadow:0 18px 34px #4026b426,inset 0 0 0 4px #ffffff90}
+.character-option input:checked~.character-check{display:block}
+.character-option input:focus-visible+.character-tile{outline:3px solid #9d87e4;outline-offset:4px}
+.is-dragging .character-option{transition:none}
+.is-dragging .character-arc{cursor:grabbing}
+.character-navigation{display:flex;align-items:center;justify-content:center;gap:28px;position:relative}
+.character-arrow{width:var(--auth-control-height,44px);height:var(--auth-control-height,44px);display:grid;place-items:center;padding:0 0 3px;border:1.5px solid #d6c9f1;border-radius:50%;background:#ffffff9c;color:var(--purple);font-size:30px;line-height:1;transition:background 150ms,transform 150ms}
+.character-arrow:hover{background:#ede6fc}.character-arrow:active{transform:scale(.94)}
+.character-arrow:focus-visible{outline:3px solid #9d87e4;outline-offset:3px}
+.character-caption{display:flex;flex-direction:column;align-items:center;gap:5px;min-width:110px}
+.character-caption strong{font-size:20px;font-weight:800;letter-spacing:-.5px;color:#100b45}
+.character-caption>span{font-size:10px;letter-spacing:1.5px;font-variant-numeric:tabular-nums;color:#9485ac}
+.character-description{max-width:300px;min-height:3.1em;margin:12px auto 0;padding:0 8px;color:#7e6b94;font-size:12px;font-style:italic;font-weight:450;line-height:1.55;text-align:center}
+.character-direction-hint{text-align:center;color:#a193b3;font-size:11px;line-height:1.5;margin:16px 0 0}
+.character-direction-hint:before{content:'↔';font-size:15px;margin-right:7px;color:#b7a8cf}
+.character-picker:disabled{opacity:.65}
+.character-avatar{display:inline-flex;overflow:hidden;background:#f0ebf9;border:1px solid #e4dbee;flex-shrink:0;padding:0;aspect-ratio:1}
+.character-avatar.is-circle{border-radius:50%}.character-avatar.is-square{border-radius:14px}
+.character-avatar .character-art{height:100%;width:100%}
+.character-avatar.large{height:65px;width:65px}
+.onboarding.is-form{overflow:clip}
+
+@media(max-height:700px){.auth-panel .player-heading h1{margin-bottom:18px}.character-picker{--arc-card-size:128px;--arc-radius:330px;--arc-headroom:38px;margin:0 0 14px}.character-direction-hint{display:none}}
+@media(prefers-reduced-motion:reduce){.character-option,.character-tile,.character-arrow{transition:none!important}}
