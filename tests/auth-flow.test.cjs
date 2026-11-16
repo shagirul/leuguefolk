@@ -5,7 +5,8 @@ const vm=require('node:vm');
 
 // Exercise the app's real event handlers and auth observer with SDK/DOM boundaries mocked.
 async function fixture({loginError,signupError,resetError,resetWait,initialAvatar}={}){
-  const competition={...await import('../public/domain.mjs'),...await import('../public/outbox.mjs'),...await import('../public/record-match.mjs'),...await import('../public/activity.mjs'),...await import('../public/bulk-accept.mjs'),...await import('../public/matchups.mjs')};
+  const pwa=await import('../public/pwa.mjs');
+  const competition={...pwa,...await import('../public/domain.mjs'),...await import('../public/outbox.mjs'),...await import('../public/record-match.mjs'),...await import('../public/activity.mjs'),...await import('../public/bulk-accept.mjs'),...await import('../public/matchups.mjs')};
   const {createFirestoreApi}=await import('../public/firestore-api.mjs');
   const avatars=await import('../public/avatars.mjs');
   const account=await import('../public/account.mjs');

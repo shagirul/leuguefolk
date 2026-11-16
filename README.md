@@ -92,4 +92,6 @@ See [the completed technical acceptance report](docs/PHASE1_ACCEPTANCE.md). `npm
 
 ## Rating engine validation
 
+Install Leaguefolk from the header's download icon or open `/install`. The installed app hides the icon and future releases show a “New version available” panel. Update activates the latest complete worker and reloads once, protecting unsaved edits and queued matches. Firebase Hosting runs `scripts/build-release.mjs` automatically before deployment; run `npm run build:release` before committing. See [PWA lifecycle behavior and browser limitations](docs/PWA_LIFECYCLE.md). Optional end-to-end update checks run with `npm run test:pwa-browser` when Playwright/Chromium is installed; `LEAGUEFOLK_PLAYWRIGHT_MODULE` and `LEAGUEFOLK_CHROME_PATH` can point to an existing runtime.
+
 Run `npm run build:ratings` to rebuild the pinned browser bundle, `npm test` for unit checks, `npm run test:rules` for local Firebase authorization checks, and `npm run simulate:ratings` for the four-week pilot scenario. Deploy Hosting and Firestore rules together for the new ranked/casual ticket schema.

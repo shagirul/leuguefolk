@@ -104,6 +104,15 @@
             "value": "no-cache"
           }
         ]
+      },
+      {
+        "source": "/{pwa.mjs,pwa-boot.js,pwa.css}",
+        "headers": [
+          {
+            "key": "Cache-Control",
+            "value": "no-cache"
+          }
+        ]
       }
     ],
     "rewrites": [
@@ -111,6 +120,9 @@
         "source": "**",
         "destination": "/index.html"
       }
+    ],
+    "predeploy": [
+      "node scripts/build-release.mjs"
     ]
   },
   "emulators": {

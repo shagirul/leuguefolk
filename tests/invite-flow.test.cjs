@@ -5,7 +5,8 @@ const settle=()=>new Promise(resolve=>setImmediate(resolve));
 
 async function fixture({storage=memory(),records=new Map(),path='/invite/'+code,joinHook}={}){
   const avatars=await import('../public/avatars.mjs'),account=await import('../public/account.mjs'),invites=await import('../public/invites.mjs'),leaderboard=await import('../public/leaderboard.mjs');
-  const competition={...await import('../public/domain.mjs'),...await import('../public/outbox.mjs'),...await import('../public/record-match.mjs'),...await import('../public/activity.mjs'),...await import('../public/bulk-accept.mjs'),...await import('../public/matchups.mjs')};
+  const pwa=await import('../public/pwa.mjs');
+  const competition={...pwa,...await import('../public/domain.mjs'),...await import('../public/outbox.mjs'),...await import('../public/record-match.mjs'),...await import('../public/activity.mjs'),...await import('../public/bulk-accept.mjs'),...await import('../public/matchups.mjs')};
   const {createFirestoreApi}=await import('../public/firestore-api.mjs');
   const initial=new URL(path,'https://app.test'),location={pathname:initial.pathname,search:initial.search,origin:initial.origin},events={},windowEvents={},writes=[],shared=[];
   const root={innerHTML:''},toast={textContent:'',classList:{add(){},remove(){}},style:{}},auth={currentUser:null};let observer;

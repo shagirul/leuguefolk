@@ -1,0 +1,31 @@
+# Installation and application updates
+
+The header's download icon opens `/install`, next to Inbox. It is hidden in installed display modes, iOS home-screen mode, after a confirmed `appinstalled` event, or when a supported OS-inventory API confirms this PWA is installed. The install page does not link to itself from its header. It supports direct unauthenticated links and returns to the previous app screen without consuming an invitation or clearing the match draft.
+
+`pwa-boot.js` captures early browser install events before the Firebase/module graph loads. `pwa.mjs` consumes a native prompt exactly once, calls it inside the user's click, blocks duplicate prompts, and handles dismissal, expiration, rejection and new later eligibility events. Accepting the dialog is not treated as OS installation confirmation. A local-storage “installed forever” flag is deliberately not used; it would become stale after uninstalling.
+
+Where available, `getInstalledRelatedApps` checks only our self-referenced web app identity from the manifest. Inventory queries time out and cannot overwrite newer browser eligibility events. Display-mode changes and resumed pages refresh detection. Safari/iOS and privacy-limited browsers cannot universally report whether an app opened in an ordinary browser tab is already installed elsewhere. We can reliably hide the icon inside the installed app; in an unobservable normal tab the manual install guide may still appear. We do not claim that absence of `beforeinstallprompt` means installed.
+
+Native install is only offered when the browser supplies a usable prompt. The page otherwise gives platform-specific steps for iPhone/iPad (Share → Add to Home Screen), Android menus, desktop Safari (Add to Dock), or supported desktop browsers. Embedded browsers are told to open the main browser. There is no fake download or store-install button and no automatic re-prompt after dismissal. Offline availability is described only when a worker controls the page.
+
+## Controlled updates
+
+The worker URL and manifest identity stay stable. Registration uses `updateViaCache: none`; checks run on startup, online/resume events and a five-minute timer. Resume checks are throttled to a minute. Background/closed app scheduling is browser-controlled: a closed app cannot display a real-time update popup. It discovers available releases when opened or resumed.
+
+`scripts/build-release.mjs` computes a deterministic hash of all public files and the normalized worker source. Git newline normalization does not change the identity. The hash becomes the worker's BUILD value and release-specific cache name. Every Hosting deployment runs this script through `hosting.predeploy`, so future UI changes or worker-only changes cannot silently miss a manual version bump. Run `npm run build:release` before committing to keep the checked-in generated marker aligned with the deploy output.
+
+The installer requires every core HTML/module/style/config/manifest and the Firebase SDK to be cached. It rejects missing files, HTTP failures, quota errors and incorrect content types (including Hosting's HTML rewrite masquerading as a missing JS module). Optional images can fail without preventing a safe update. A failed installation leaves the old active worker and saved data available. Release caches are isolated; a waiting worker cannot leak its assets into the currently active page, even through cache-busting query strings.
+
+An update waits for approval instead of calling skipWaiting during installation. The in-app “New version available” panel offers Update or Later, without stealing keyboard focus. Update rechecks for the newest available worker and waits for any replacement download, then messages that worker to activate. A superseded waiting worker is not mistaken for a failed update. Only a confirmed controller switch reloads the page, once. The reload is controlled by the new worker's fully cached HTML and modules, rather than a mixture of fresh and stale assets.
+
+Unsent form edits require a separate discard confirmation. An active sign-in, send or bulk action blocks reload. Edits begun while downloading are checked again before reloading. If another tab activates an update, this tab is notified and is not automatically reloaded over its edits. A downloaded update can activate offline. Download/activation failures expose retryable status instead of leaving an “Updating…” spinner forever. IndexedDB queues, Firebase Auth persistence and Firestore offline data are never cleared. Cache cleanup keeps the previous shell generation and does not delete a newer pending worker cache.
+
+First installs activate normally and never produce a false “new version” popup or a reload loop. Existing users need to reload once to adopt these controls; older already-open JavaScript cannot retroactively gain a new update UI. After that, future releases are handled through the panel. If every client closes, the browser can naturally activate a waiting release and the next launch is already current, so no redundant popup is shown.
+
+## Verification
+
+`tests/pwa.test.cjs` exercises prompt consumption, boot events, installed-state races, unsupported APIs, mode changes, dirty/busy guards, first installs, multi-tab activation, superseded workers, offline activation and failure recovery. `tests/service-worker.test.cjs` checks active-cache isolation and offline module responses. `tests/release-build.test.cjs` checks automatic, reproducible release identity.
+
+A real local Chromium service-worker test also upgrades multiple releases, changes the available version just before Update, rejects a bad core response, tolerates an optional-image failure, preserves an IndexedDB queued match, protects another tab's draft, and activates a complete update offline. Manual-device validation on iOS is still useful for the system-controlled Share sheet; desktop browser automation cannot open an iPhone's installation UI.
+
+References: [Install event lifecycle](https://web.dev/articles/customize-install), [installed app detection](https://developer.mozilla.org/en-US/docs/Web/API/Navigator/getInstalledRelatedApps), and [service-worker update behavior](https://web.dev/learn/pwa/update).

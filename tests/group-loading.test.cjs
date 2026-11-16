@@ -2,7 +2,7 @@ const test=require('node:test'),assert=require('node:assert/strict'),fs=require(
 const gid='aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
 function fixture(){
   const watchers=[],timers=new Map(),events={},root={innerHTML:''};let timerId=0;
-  const context=vm.createContext({console,Intl,Date,bindScrollHeader:()=>({reset(){}}),navigator:{onLine:true},location:{pathname:'/',origin:'https://app.test'},
+  const context=vm.createContext({createPwaController:()=>({sync(){},start(){}}),console,Intl,Date,bindScrollHeader:()=>({reset(){}}),navigator:{onLine:true},location:{pathname:'/',origin:'https://app.test'},
     self:{AGREE_FIREBASE:{firebaseConfig:{apiKey:'test',appId:'test'}}},randomAvatar:()=>({id:'istj-anchor'}),validAvatar:id=>id==='istj-anchor',bindAvatarGestures(){},bindQuickOpponents:()=>()=>{},createInviteIntentStore:()=>({get:()=>null,path:p=>p}),renderGroupTiles:()=>'',createCharacterTooltipController:()=>({hide(){},sync(){},isOpen:()=>false}),
     document:{getElementById:()=>root,addEventListener:(type,cb)=>{events[type]=cb;}},window:{addEventListener(){},scrollTo(){}},
     history:{replaceState(){},pushState(){}},localStorage:{getItem:()=>null,setItem(){}},

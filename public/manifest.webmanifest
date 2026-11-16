@@ -45,5 +45,13 @@
       "type": "image/png",
       "purpose": "monochrome"
     }
+  ],
+  "prefer_related_applications": false,
+  "related_applications": [
+    {
+      "platform": "webapp",
+      "url": "https://leaguefolk-2b1c2.web.app/manifest.webmanifest",
+      "id": "https://leaguefolk-2b1c2.web.app/"
+    }
   ]
 }

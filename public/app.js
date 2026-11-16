@@ -1,3 +1,4 @@
+import {createPwaController,renderInstallContent} from '/pwa.mjs';
 import {renderMatchups,matchupStats,matchupGoal} from '/matchups.mjs';
 import {buildAcceptancePlan,queueAcceptancePlan} from '/bulk-accept.mjs';
 import {renderMatchesContent,renderInboxContent,matchNeedsYou,mountMatchSwipes} from '/activity.mjs';
@@ -35,13 +36,14 @@ function writeLocal(key,value){try{globalThis.localStorage?.setItem(key,value);}
 function removeLocal(key){try{globalThis.localStorage?.removeItem(key);}catch{}}
 const inviteIntent=createInviteIntentStore({getItem:readLocal,setItem:writeLocal,removeItem:removeLocal},location);
 const state={user:null,profile:null,memberships:[],groupTiles:{},pendingInvite:inviteIntent.get(),invite:null,inviteLoading:false,inviteBusy:false,inviteError:'',groupId:null,group:null,members:[],tickets:[],notifications:[],ticketEvents:[],queue:[],online:navigator.onLine,route:parsePath(),period:'weekly',matchupTab:'yours',matchTab:'requests',bulkAcceptBusy:false,profileTab:'achievements',dialog:null,draft:{},authMode:'welcome',authEmail:'',avatarId:randomAvatar().id,authBusy:false,notice:null,loadError:'',authLoading:true,groupLoading:false,showGroupPicker:false,initialized:false};
+const pwa=createPwaController({window,document,navigator,location,onRegistration:registration=>{swReg=registration;},onChange:()=>{if(state.route.view==='install')render();},blocker:()=>state.authBusy||state.bulkAcceptBusy||flushBusy?'busy':document.querySelector?.('form[data-pwa-dirty="true"]')?'dirty':null});
 let closeQuickOpponents=()=>{},bulkAcceptVersion=0;
 const unsub={};let firebaseApp,auth,store,firestoreApi,messaging=null,swReg=null,flushBusy=false,toastTimeout,lastPushSync=0;
 let groupLoadTimer=null,groupListenerVersion=0;
 let inviteLoadVersion=0;
 function when(value){return value?.toDate?value.toDate():(value?new Date(value):null);}
 function dateShort(value){const d=when(value);return d&&!Number.isNaN(+d)?d.toLocaleString('en-IN',{day:'numeric',month:'short',hour:'numeric',minute:'2-digit'}):'Just now';}
-function parsePath(){const p=String(location.pathname||'');const match=p.match(/^\/g\/([a-f0-9-]{36})(?:\/(t\/([a-f0-9-]{36})|matchups(?:\/([^/]+))?|players\/([^/]+)|matches|leaderboard|inbox|profile|new))?\/?$/i);if(!match)return {groupId:null,view:'leaderboard'};let playerId,opponentId;try{playerId=match[5]?decodeURIComponent(match[5]):null;}catch{}try{opponentId=match[4]?decodeURIComponent(match[4]):null;}catch{}return {groupId:match[1],view:match[2]?.startsWith('players/')?'player':match[3]?'ticket':match[2]?.startsWith('matchups')?'matchups':match[2]||'leaderboard',ticketId:match[3],opponentId,playerId};}
+function parsePath(){const p=String(location.pathname||'');if(p==='/install'||p==='/install/')return {groupId:null,view:'install'};const match=p.match(/^\/g\/([a-f0-9-]{36})(?:\/(t\/([a-f0-9-]{36})|matchups(?:\/([^/]+))?|players\/([^/]+)|matches|leaderboard|inbox|profile|new))?\/?$/i);if(!match)return {groupId:null,view:'leaderboard'};let playerId,opponentId;try{playerId=match[5]?decodeURIComponent(match[5]):null;}catch{}try{opponentId=match[4]?decodeURIComponent(match[4]):null;}catch{}return {groupId:match[1],view:match[2]?.startsWith('players/')?'player':match[3]?'ticket':match[2]?.startsWith('matchups')?'matchups':match[2]||'leaderboard',ticketId:match[3],opponentId,playerId};}
 function periodKeys(date){const parts=Object.fromEntries(new Intl.DateTimeFormat('en-CA',{timeZone:'Asia/Kolkata',year:'numeric',month:'2-digit',day:'2-digit'}).formatToParts(date).filter(x=>x.type!=='literal').map(x=>[x.type,x.value]));const t=new Date(Date.UTC(+parts.year,+parts.month-1,+parts.day));t.setUTCDate(t.getUTCDate()-(t.getUTCDay()+6)%7);return {weekKey:t.toISOString().slice(0,10),monthKey:`${parts.year}-${parts.month}`};}
 const userName=userId=>state.members.find(m=>m.id===userId)?.displayName||((state.user?.uid===userId)?(state.profile?.displayName||'You'):'Player');
 const userAvatar=userId=>userId===state.user?.uid?state.profile?.avatarId:state.members.find(m=>m.id===userId)?.avatarId;
@@ -221,8 +223,10 @@ function bindDrawerGestures(target,onDismiss){
   target.addEventListener('lostpointercapture',()=>{if(drag)reset();});
   target.addEventListener('click',e=>{if(suppressClick){suppressClick=false;if(e.target.closest?.('.modal-handle')){e.preventDefault();e.stopImmediatePropagation();}}},true);
 }
-function render(){
+function render(){try{renderScreen();}finally{pwa.sync();}}
+function renderScreen(){
   if(!ready){root.innerHTML=`<div class="auth-wrap"><div class="auth-card"><img class="logo-mark" src="/icons/icon-192x192.png" width="66" height="66" alt="" /><h1>Connect your Firebase app</h1><p>This PWA is intentionally not connected to anyone else's project.</p>${note('warn','Edit <strong>public/firebase-config.js</strong> and add your web app config and public VAPID key. Follow README.md to enable Firebase services and deploy.')}</div></div>`;return;}
+  if(state.route.view==='install'){root.innerHTML='<div class="account-page install-page">'+renderLeagueHeader({title:'Install Leaguefolk',back:true,backAction:'installBack'})+'<main class="account-body">'+renderInstallContent(pwa.getState(),navigator)+'</main></div>';return;}
   if(state.authLoading){root.innerHTML=`<div class="loading"><img class="logo-mark" src="/icons/icon-192x192.png" width="66" height="66" alt="" /><h1>Leaguefolk</h1><p>Loading your account…</p></div>`;return;}
   if(!state.user){root.innerHTML=authScreen();return;}
   if(!state.profile?.username||!validAvatar(state.profile.avatarId)){root.innerHTML=profileSetup();return;}
@@ -426,6 +430,7 @@ async function enablePush(){
   }catch(e){console.error(e);toast('Push setup: '+errText(e));}
 }
 function ensureRoute(){
+  if(state.route.view==='install')return;
   if(!backendEnabled||!state.user||!state.profile?.username||!validAvatar(state.profile.avatarId)||state.showGroupPicker||state.pendingInvite)return;
   const route=state.route;
   if(route.groupId&&state.memberships.some(g=>g.groupId===route.groupId)){
@@ -503,8 +508,8 @@ function start(){
     connectFirestoreEmulator(store,'127.0.0.1',8180);
   }
   firestoreApi=createFirestoreApi(store,auth,{doc,runTransaction,serverTimestamp,increment,getDocs,collection});
-  if(!settings.emulators&&'serviceWorker' in navigator){navigator.serviceWorker.register('/firebase-messaging-sw.js',{scope:'/'}).then(r=>{swReg=r;}).catch(e=>console.warn('PWA worker registration failed',e));
-    navigator.serviceWorker.addEventListener('message',e=>{if(e.data?.type==='FLUSH_QUEUE')flushOutbox();});}
+  if(!settings.emulators)pwa.start();
+  try{navigator.serviceWorker?.addEventListener?.('message',e=>{if(e.data?.type==='FLUSH_QUEUE')flushOutbox();});}catch{/* Service workers may be blocked in private/sandboxed browsers. */}
   if(pushEnabled)isSupported().then(s=>{if(!s)return; messaging=getMessaging(firebaseApp);onMessage(messaging,payload=>{
     toast(payload.notification?.title||'A match was updated.',payload.data?.path);
   });}).catch(e=>console.warn('FCM not supported',e));
@@ -524,7 +529,9 @@ document.addEventListener('click',async e=>{
   const b=e.target.closest('[data-action]');if(!b)return;
   const action=b.dataset.action,id=b.dataset.id,t=state.tickets.find(v=>v.id===state.route.ticketId);
   try{
-    if(action==='avatarPrevious'||action==='avatarNext'){const picker=b.closest('.character-picker');if(picker&&!picker.disabled)state.avatarId=stepAvatarPicker(picker,action==='avatarNext'?1:-1);}
+    if(action==='installPage'){state.installReturnPath=location.pathname+(location.search||'');history.pushState({},'','/install');state.route=parsePath();state.dialog=null;render();root.scrollTop=0;}
+    else if(action==='installBack'){if(state.installReturnPath){state.installReturnPath=null;history.back();}else navigate('/');}
+    else if(action==='avatarPrevious'||action==='avatarNext'){const picker=b.closest('.character-picker');if(picker&&!picker.disabled)state.avatarId=stepAvatarPicker(picker,action==='avatarNext'?1:-1);}
     else if(action==='accountSettings')openDialog('accountSettings');
     else if(action==='accountInvite')openDialog('accountInvite');
     else if(action==='characterInfo')characterTooltip.toggle(b);

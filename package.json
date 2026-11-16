@@ -10,7 +10,9 @@
     "invites:backfill": "node scripts/backfill-invite-players.mjs",
     "deploy": "npx firebase-tools deploy --only hosting,firestore",
     "build:ratings": "node scripts/build-ratings.mjs",
-    "simulate:ratings": "node scripts/simulate-ratings.mjs"
+    "simulate:ratings": "node scripts/simulate-ratings.mjs",
+    "build:release": "node scripts/build-release.mjs",
+    "test:pwa-browser": "node tests/pwa-lifecycle.browser.cjs"
   },
   "devDependencies": {
     "esbuild": "0.28.2",
