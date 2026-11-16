@@ -27,7 +27,8 @@ service cloud.firestore {
         && a.revision is int && a.revision >= 1 && a.revision <= 30 && named(a.note,0,280) && a.at is timestamp);
     }
     function ticketShape(t,gid) {
-      return t.keys().hasOnly(['groupId','playerA','playerB','createdBy','createdAt','playedAt','updatedAt','status','revision','version','turn','disputed','proposal','finalScore','finalizedAt','cancellation','amendment','action'])
+      return t.keys().hasOnly(['groupId','playerA','playerB','createdBy','createdAt','playedAt','updatedAt','status','revision','version','turn','disputed','proposal','finalScore','finalizedAt','cancellation','amendment','action','mode'])
+        && t.get('mode','ranked') in ['ranked','casual']
         && t.groupId == gid && named(t.playerA,1,128) && named(t.playerB,1,128) && t.playerA != t.playerB && t.createdBy == t.playerA
         && t.createdAt is timestamp && t.playedAt == t.createdAt && t.updatedAt == request.time
         && t.revision is int && t.revision >= 1 && t.revision <= 30 && t.version is int && t.version >= 1
@@ -96,11 +97,12 @@ service cloud.firestore {
           : (t.action.kind in ['startAmendment','counterAmendment'] ? t.amendment.score : null));
     }
     function previewPath(invite,uid) { return /databases/$(database)/documents/inviteCodes/$(invite)/players/$(uid); }
-    function rankXp(t,uid) { return t.status == 'finalized' ? (uid == t.playerA ? t.finalScore.a : t.finalScore.b) * 2 : 0; }
+    // Deprecated invite projection field: no XP is awarded by the new system.
+    function rankXp(t,uid) { return 0; }
     function rankPlayed(t) { return t.status == 'finalized' ? 1 : 0; }
     function rankWins(t,uid) { return t.status == 'finalized' && (uid == t.playerA ? t.finalScore.a > t.finalScore.b : t.finalScore.b > t.finalScore.a) ? 1 : 0; }
     function rankingChanged(t,n) {
-      return (t.status == 'finalized' || n.status == 'finalized') && (t.status != n.status || t.finalScore != n.finalScore);
+      return rankPlayed(t) != rankPlayed(n) || rankWins(t,t.playerA) != rankWins(n,n.playerA) || rankWins(t,t.playerB) != rankWins(n,n.playerB);
     }
     function rankingWritten(t,gid,tid) {
       let invite = get(groupPath(gid)).data.inviteCode;

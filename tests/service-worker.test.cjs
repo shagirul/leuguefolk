@@ -39,3 +39,10 @@ test('offline config and code use cached responses or a defined error response',
   assert.equal((await w.request('https://app.test/firebase-config.js')).text,'cached config');
   assert.equal((await w.request('https://app.test/app.js')).status,0);
 });
+
+test('the local rating engine and replay modules refresh online and remain usable offline',async()=>{
+  for(const asset of ['/ratings.mjs','/periods.mjs','/vendor/openskill.mjs']){
+    const url='https://app.test'+asset,online=worker();assert.equal((await online.request(url)).text,'fresh response');assert.equal(online.stored.get(url),'fresh response');
+    const offline=worker({offline:true});offline.stored.set(url,'cached rating module');assert.equal((await offline.request(url)).text,'cached rating module');
+  }
+});

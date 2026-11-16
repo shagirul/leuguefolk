@@ -8,15 +8,19 @@
     "test:rules": "firebase emulators:exec --config firebase.test.json --only auth,firestore --project demo-agree \"node --test tests/profile-rules.emulator.cjs tests/groups-matches.emulator.cjs tests/password-reset.emulator.cjs tests/phase1.emulator.cjs\"",
     "serve": "npx firebase-tools emulators:start --only hosting",
     "invites:backfill": "node scripts/backfill-invite-players.mjs",
-    "deploy": "npx firebase-tools deploy --only hosting,firestore"
+    "deploy": "npx firebase-tools deploy --only hosting,firestore",
+    "build:ratings": "node scripts/build-ratings.mjs",
+    "simulate:ratings": "node scripts/simulate-ratings.mjs"
   },
   "devDependencies": {
+    "esbuild": "0.28.2",
     "fake-indexeddb": "6.2.8",
     "firebase-admin": "^14.5.1",
     "firebase-tools": "^15.35.0"
   },
   "dependencies": {
-    "firebase": "^13.3.0"
+    "firebase": "^13.3.0",
+    "openskill": "5.0.1"
   },
   "overrides": {
     "@firebase/firestore": {

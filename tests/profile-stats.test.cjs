@@ -10,17 +10,17 @@ test('profile stats use only the player’s verified scores, from either side of
     match(10,21,19,{amendment:{kind:'score',score:{a:0,b:100}}})
   ],'me');
   assert.equal(stats.played,5);assert.equal(stats.wins,3);assert.equal(stats.losses,1);assert.equal(stats.draws,1);
-  assert.equal(stats.winRate,60);assert.equal(stats.xp,166);assert.equal(stats.level,2);assert.equal(stats.levelProgress,66);assert.equal(stats.toNext,34);
+  assert.equal(stats.winRate,60);assert.ok(Number.isFinite(stats.skill));assert.ok(!('xp' in stats));assert.ok(!('level' in stats));
   assert.equal(stats.pointsScored,83);assert.equal(stats.pointsConceded,77);assert.equal(stats.pdRatio,83/77);
   assert.equal(stats.bestStreak,2);assert.deepEqual(stats.recent.map(m=>m.result),['W','D','L','W','W']);
 });
 
-test('new accounts have honest zero-match stats and level one progress',async()=>{
+test('new accounts have honest zero-match stats and provisional 1000 skill',async()=>{
   const {summarizeProfile,accountAchievements}=await import('../public/account.mjs');
   const stats=summarizeProfile([],'me');
-  assert.equal(stats.played,0);assert.equal(stats.wins,0);assert.equal(stats.xp,0);assert.equal(stats.winRate,0);
+  assert.equal(stats.played,0);assert.equal(stats.wins,0);assert.equal(stats.skill,1000);assert.equal(stats.winRate,0);
   assert.equal(stats.pdRatio,null);
-  assert.equal(stats.level,1);assert.equal(stats.levelProgress,0);assert.equal(stats.toNext,100);assert.deepEqual(stats.recent,[]);
+  assert.equal(stats.provisional,true);assert.equal(stats.rankedPlayed,0);assert.deepEqual(stats.recent,[]);
   assert.equal(accountAchievements({tickets:[],uid:'me',groupId:'club'}).filter(a=>a.unlocked).length,0);
 });
 
@@ -35,10 +35,10 @@ test('P/D uses total points, handles shutouts and reflects agreed corrections an
   assert.match(html,/<strong>1\.82<\/strong><small>P\/D ratio/);assert.match(html,/Total matches/);assert.match(html,/Win ratio/);assert.match(html,/Points scored ÷ points conceded · 20 ÷ 11/);
 });
 
-test('profile tracks real win streaks and exact XP level boundaries',async()=>{
+test('profile tracks real win streaks without XP level rewards',async()=>{
   const {summarizeProfile}=await import('../public/account.mjs');
   const tickets=Array.from({length:10},(_,i)=>({id:String(i),playerA:'me',playerB:'friend',status:'finalized',finalScore:{a:20,b:i<6?10:21},createdAt:{toDate:()=>new Date(2026,0,i+1)}}));
   const stats=summarizeProfile(tickets,'me');
-  assert.equal(stats.wins,6);assert.equal(stats.played,10);assert.equal(stats.bestStreak,6);assert.equal(stats.xp,400);
-  assert.equal(stats.level,5);assert.equal(stats.levelProgress,0);assert.equal(stats.toNext,100);
+  assert.equal(stats.wins,6);assert.equal(stats.played,10);assert.equal(stats.bestStreak,6);assert.ok(!("xp" in stats));
+  assert.ok(Number.isFinite(stats.skill));assert.ok(stats.rankedPlayed<=stats.played);
 });

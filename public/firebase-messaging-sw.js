@@ -1,13 +1,14 @@
 /* ONE worker for app-shell caching AND FCM background notifications.
  * Register notificationclick BEFORE importing Firebase: its default handler can otherwise override yours.
  */
-const CACHE='agree-shell-v44';
+const CACHE='agree-shell-v45';
 const SDK_CACHE='agree-firebase-sdk-v1';
 const FIREBASE_SDK=['firebase-app.js','firebase-auth.js','firebase-firestore.js','firebase-messaging.js'].map(f=>`https://www.gstatic.com/firebasejs/12.19.0/${f}`);
 const AVATAR_ASSETS=['istj-anchor','estj-captain','isfj-guardian','esfj-connector','esfp-showstopper','isfp-freebird','estp-daredevil','istp-virtuoso','infj-oracle','enfj-catalyst','infp-dreamer','enfp-spark','intp-analyst','entp-maverick','intj-strategist','entj-conqueror'].map(id=>`/assets/characters/${id}.webp`);
 const ACHIEVEMENT_ASSETS=['01_whitewash','02_the_untouchable','03_rival_dominator','04_three_peat','05_table_conqueror','06_perfect_reign','locked_placeholder'].map(id=>`/assets/achievements/${id}.png`);
 const APP_ICONS=["/icons/icon-192x192.png","/icons/icon-512x512.png","/icons/icon-maskable-192x192.png","/icons/icon-maskable-512x512.png","/icons/icon-monochrome-192x192.png","/icons/icon-monochrome-512x512.png","/apple-touch-icon.png","/favicon.svg","/favicon.ico","/favicon-16x16.png","/favicon-32x32.png","/safari-pinned-tab.svg"];
-const PRECACHE=[...APP_ICONS,'/','/index.html','/styles.css','/avatars.css','/account.css','/leaderboard.css','/invites.css','/app.js','/firestore-api.mjs','/domain.mjs','/avatars.mjs','/characters.mjs','/account.mjs','/achievements.mjs','/leaderboard.mjs','/invites.mjs',...AVATAR_ASSETS,...ACHIEVEMENT_ASSETS,'/assets/stats/matches-played.png','/assets/stats/win-ratio.png','/assets/stats/pd-ratio.png','/queue.js','/outbox.mjs','/record-match.mjs','/record-match.css','/activity.mjs','/bulk-accept.mjs','/matchups.mjs','/matchups.css','/activity.css','/manifest.webmanifest','/firebase-config.js','/icons/icon-192.png','/icons/icon-512.png'];
+const RATING_ASSETS=['/ratings.mjs','/periods.mjs','/vendor/openskill.mjs','/vendor/openskill.LICENSE.txt'];
+const PRECACHE=[...RATING_ASSETS,...APP_ICONS,'/','/index.html','/styles.css','/avatars.css','/account.css','/leaderboard.css','/invites.css','/app.js','/firestore-api.mjs','/domain.mjs','/avatars.mjs','/characters.mjs','/account.mjs','/achievements.mjs','/leaderboard.mjs','/invites.mjs',...AVATAR_ASSETS,...ACHIEVEMENT_ASSETS,'/assets/stats/matches-played.png','/assets/stats/win-ratio.png','/assets/stats/pd-ratio.png','/queue.js','/outbox.mjs','/record-match.mjs','/record-match.css','/activity.mjs','/bulk-accept.mjs','/matchups.mjs','/matchups.css','/activity.css','/manifest.webmanifest','/firebase-config.js','/icons/icon-192.png','/icons/icon-512.png'];
 self.addEventListener('notificationclick',event=>{
   const raw=event.notification?.data||{};
   const msg=raw.FCM_MSG||raw;
@@ -70,7 +71,7 @@ self.addEventListener('fetch',event=>{
   }
   if(PRECACHE.includes(url.pathname)){
     // Refresh app code when online, or installed PWAs can be stuck on outdated assets.
-    if(['/app.js','/firestore-api.mjs','/domain.mjs','/avatars.mjs','/characters.mjs','/account.mjs','/achievements.mjs','/leaderboard.mjs','/invites.mjs','/queue.js','/outbox.mjs','/record-match.mjs','/record-match.css','/activity.mjs','/bulk-accept.mjs','/matchups.mjs','/matchups.css','/activity.css','/styles.css','/avatars.css','/account.css','/leaderboard.css','/invites.css','/manifest.webmanifest'].includes(url.pathname)){
+    if(RATING_ASSETS.includes(url.pathname)||['/app.js','/firestore-api.mjs','/domain.mjs','/avatars.mjs','/characters.mjs','/account.mjs','/achievements.mjs','/leaderboard.mjs','/invites.mjs','/queue.js','/outbox.mjs','/record-match.mjs','/record-match.css','/activity.mjs','/bulk-accept.mjs','/matchups.mjs','/matchups.css','/activity.css','/styles.css','/avatars.css','/account.css','/leaderboard.css','/invites.css','/manifest.webmanifest'].includes(url.pathname)){
       event.respondWith(fetch(req).then(r=>{cacheResponse(event,CACHE,req,r);return r;})
         .catch(()=>caches.match(req).then(r=>r||Response.error())));return;
     }

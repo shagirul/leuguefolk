@@ -15,6 +15,7 @@ groups/{groupId}: {name, creatorUid, inviteCode, createdAt, timeZone:"Asia/Kolka
     groupId, playerA, playerB, createdBy
     createdAt, playedAt, updatedAt, finalizedAt
     status: "open" | "finalized" | "cancelled"
+    mode: "ranked" | "casual" (immutable; legacy missing field means ranked)
     revision: int (1..30), version: int, turn: uid | null, disputed: boolean
     proposal: {score:{a,b}, by, note, at}
     finalScore: {a,b} | null
@@ -37,13 +38,13 @@ Usernames are 3–24 letters, numbers or underscores. `username == displayName.l
 
 ## Group authorization
 
-Group creation atomically writes the group, invite index, creator member, user membership and a zero-XP invite-player projection. Joining reads a known invitation and creates only the caller's member, user-membership and zero-XP projection. Rules validate matching getAfter() records, invitation proof and profile name/avatar. Rejoining is a no-op. Creator UID is audit metadata, not an administrator role. Invitation lookups require authentication; listing codes is denied. Nonmembers cannot read private group contents.
+Group creation atomically writes the group, invite index, creator member, user membership and a empty invite-player projection. Joining reads a known invitation and creates only the caller's member, user-membership and empty projection. Rules validate matching getAfter() records, invitation proof and profile name/avatar. Rejoining is a no-op. Creator UID is audit metadata, not an administrator role. Invitation lookups require authentication; listing codes is denied. Nonmembers cannot read private group contents.
 
 ## Share links and invitation consent
 
 The canonical link is `/invite/{8-character-code}`. Capture it before authentication and retain a versioned pending intent in local storage. Internal navigation also carries `?invite=CODE` while unresolved, so storage restrictions do not erase the intent. Email login, signup, Google popup, password reset, username/avatar setup and auth-state changes do not consume it. A newer explicit invitation replaces the previous one. Malformed links show an invalid-invitation state rather than reviving an older stored link.
 
-After authentication and profile setup, the pending invitation takes precedence over remembered group routing. The join card queries up to 20 preview players ordered by all-time wins (three competition points per win). It requires an explicit Join or Decline. Failed reads/joins retain the intent. Successful joins and explicit declines clear storage and replace the invite history entry; an existing member sees Open group. Async responses are checked against the current user and invitation before altering state.
+After authentication and profile setup, the pending invitation takes precedence over remembered group routing. The join card queries up to 20 preview players ordered by raw all-time verified wins. This is a history preview, not a skill or championship leaderboard. It requires an explicit Join or Decline. Failed reads/joins retain the intent. Successful joins and explicit declines clear storage and replace the invite history entry; an existing member sees Open group. Async responses are checked against the current user and invitation before altering state.
 
 `inviteCodes/{code}/players` is a separate, deliberately shareable projection. A signed-in holder of that exact code can get these documents or query with `limit <= 20`; the UI displays only the top 20. Query limits bound each request, not the number of pages a code holder could request. The projection contains public player identity, aggregate verified statistics and source-action IDs, with no email, private profile fields, notes or individual match scores. Code enumeration, anonymous preview reads, and nonmember access to group/match/profile records remain denied. See [Firebase query rule guidance](https://firebase.google.com/docs/firestore/security/rules-query).
 
@@ -51,13 +52,13 @@ Group-picker avatar stacks use existing member-only queries capped at three real
 
 ## Competition points
 
-All matches are ranked, without a match-count limit or casual mode. A verified win is worth 3 points; losses and draws are worth 0. Equal point totals share a competition rank. Weekly/monthly standings derive from the immutable submission timestamp in Asia/Kolkata; Monday starts a new week without deleting tickets. Late confirmations and agreed amendments update the original submission period. There is no client-writable competition-points balance. The existing `wins` projection, independently validated by rules, orders invite previews; `xp` remains a cosmetic profile metric only. No schema migration or database reset is needed for this scoring change.
+See [SCORING.md](SCORING.md) for the current pilot policy. Tickets add immutable `mode: ranked | casual` (legacy missing mode defaults to ranked). The complete verified ticket history deterministically rebuilds one OpenSkill rating per player per club and 3/4/5-point weekly/monthly standings, with pair limits and championship activity requirements. No rating or points balance is client-writable. The legacy invite `xp` field is ignored and receives no rewards; invite wins/played are raw verified-history previews, not official skill or competition ranks.
 
 ## Match actions
 
 Initial submission uses ticketId == actionId, revision=1, version=1 and turn=playerB. Both players must be distinct members.
 
-Every action atomically writes the ticket, operation, event and the other player's notification. Actions changing verified contributions additionally update both players' invite projections with server increments. Rules bind these changes to the same ticket/action, validate each XP/played/win delta from the old and new verified scores, and reject omitted or forged projection updates. Atomic increments allow different matches to finish concurrently. Operation/event/notification IDs are immutable; replay does not award XP twice. Profile edits synchronize avatar/name snapshots without changing statistics.
+Every action atomically writes the ticket, operation, event and the other player's notification. Actions changing verified contributions additionally update both players' invite projections with server increments. Rules bind these changes to the same ticket/action, validate each played/win delta and keep the obsolete XP field unchanged from the old and new verified scores, and reject omitted or forged projection updates. Atomic increments allow different matches to finish concurrently. Operation/event/notification IDs are immutable; replay does not award counters twice. Profile edits synchronize avatar/name snapshots without changing statistics.
 
 Transactions check expectedVersion against ticket.version on every change. Negotiations also check proposal revision; amendment counters/responses check amendment revision. Firestore retries concurrent transactions, then application checks reject stale input. Rules independently require version == old.version + 1 and legal field changes.
 
@@ -69,7 +70,7 @@ Transactions check expectedVersion against ticket.version on every change. Negot
 | withdrawOriginal | Reporter cancels an untouched original submission. |
 | requestCancel | Either player requests cancellation; negotiation pauses. |
 | respondCancel | Other player accepts cancellation or resumes negotiation. |
-| startAmendment | Either player proposes a verified-score change/void; current XP remains. |
+| startAmendment | Either player proposes a verified-score change/void; the current verified result remains. |
 | counterAmendment | Recipient counters a score change and swaps turn. |
 | respondAmendment | Recipient accepts/rejects a change or mutual void. |
 
@@ -86,3 +87,5 @@ Release order: build the `players` composite index and wait until ready; review 
 Notifications have fixed generic text and rule-validated /g/{groupId}/t/{ticketId} paths. The authorized live match supplies scores/actions. Only the recipient can read the inbox or update readAt. Notification contents and device/push registrations cannot be edited by clients.
 
 The IndexedDB queue stores the original action ID, expected version and applicable revision. Reconnect/reopen replays that transaction. Permanent validation/authorization/conflict failures become blocked for review; transient network failures remain queued. Replay stops when the authenticated account changes. An offline queued action is not finalized until its transaction commits.
+
+The derived rating-event history is versioned and reconstructible from immutable ticket/audit records; it is not a client-writable Firestore rating cache. New match mode cannot be changed by a proposal or amendment. Hosting and Rules must ship together.

@@ -52,3 +52,5 @@
 @media(min-width:500px){.leaderboard-podium{gap:4px;max-width:360px;padding-top:72px}}
 .leaderboard-podium-art>.player-profile-link{width:100%;height:100%;border-radius:19px}.leaderboard-row>.player-profile-link>.avatar,.leaderboard-your-position>.player-profile-link>.avatar{width:42px;height:42px}
 .leaderboard-profile-name{border:0;padding:0;min-width:0;max-width:100%;background:none;color:inherit;text-align:inherit;cursor:pointer}.leaderboard-podium-player>.leaderboard-profile-name{font-size:12px;font-weight:750;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.leaderboard-podium-player>.leaderboard-profile-name>strong{font:inherit}.leaderboard-profile-name:focus-visible{outline:3px solid #b59bdc;outline-offset:3px;border-radius:4px}
+
+.leaderboard-periods{grid-template-columns:repeat(3,minmax(0,1fr))}.leaderboard-skill-note{font-size:11px;line-height:1.7;color:#7b6e88;margin:16px 0}

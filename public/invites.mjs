@@ -33,7 +33,7 @@ export function renderInvitePage({invite,profile={},loading=false,busy=false,err
   const players=(invite?.players||[]).slice(0,20);
   return `<div class="account-page invite-page">${renderLeagueHeader({title:'Invitation'})}<main class="account-body invite-body"><section class="invite-card" aria-busy="${loading||busy}">
     ${loading?'<div class="invite-loading" role="status"><span></span>Opening invitation…</div>':invite?`
-      ${players.length?`<div class="invite-roster-heading"><h2>Top players</h2><span>All-time points</span></div><ol class="invite-player-grid" aria-label="Top group players">${players.map((p,i)=>`<li aria-label="${i+1}. ${esc(p.displayName)}, ${Number(p.wins||0)*3} points">${playerAvatar(p.avatarId)}<span title="${esc(p.displayName)}">${esc(p.displayName)}</span></li>`).join('')}</ol>`:''}
+      ${players.length?`<div class="invite-roster-heading"><h2>Club players</h2><span>Verified history</span></div><ol class="invite-player-grid" aria-label="Top group players">${players.map((p,i)=>`<li aria-label="${i+1}. ${esc(p.displayName)}, ${Number(p.wins||0)} verified wins">${playerAvatar(p.avatarId)}<span title="${esc(p.displayName)}">${esc(p.displayName)}</span></li>`).join('')}</ol>`:''}
       <span class="invite-group-mark">${accountIcon('group')}</span><h1>${invite.alreadyMember?'You’re already in':`Join`} <span>${esc(invite.name)}${invite.alreadyMember?'':'?'}</span></h1>
       <p class="invite-description">${invite.alreadyMember?'Your group is ready.':'Your next match starts here.'}</p>
       `:`<span class="invite-group-mark">${accountIcon('group')}</span><h1>Group invitation</h1>`}
@@ -47,7 +47,7 @@ export function renderInvitePage({invite,profile={},loading=false,busy=false,err
 export function verifiedContribution(ticket,uid){
   if(ticket?.status!=='finalized'||!ticket.finalScore||![ticket.playerA,ticket.playerB].includes(uid))return {xp:0,played:0,wins:0};
   const own=ticket.playerA===uid?ticket.finalScore.a:ticket.finalScore.b,other=ticket.playerA===uid?ticket.finalScore.b:ticket.finalScore.a;
-  return {xp:own*2,played:1,wins:own>other?1:0};
+  return {xp:0,played:1,wins:own>other?1:0};
 }
 
 // Shared by the one-time Admin migration and its tests. No client may write an arbitrary balance.

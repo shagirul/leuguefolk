@@ -92,7 +92,8 @@ export function createFirestoreApi(store,auth,{doc,runTransaction,serverTimestam
   async function submitMatch(data,uid){
     const gid=id(data.groupId),aid=id(data.actionId),opponent=text(data.opponentUid,1,128);
     if(opponent===uid)fail('You cannot play yourself.','invalid-argument');
-    const score=validScore({a:data.scoreSelf,b:data.scoreOpponent}),message=note(data.note);
+    const score=validScore({a:data.scoreSelf,b:data.scoreOpponent}),message=note(data.note),mode=data.mode??'ranked';
+    if(!['ranked','casual'].includes(mode))fail('Choose ranked or casual.','invalid-argument');
     return runTransaction(store,async tx=>{
       const [old,op,ma,mb]=await Promise.all([tx.get(ticket(gid,aid)),tx.get(operation(gid,aid)),tx.get(member(gid,uid)),tx.get(member(gid,opponent))]);
       if(old.exists()){
@@ -102,7 +103,7 @@ export function createFirestoreApi(store,auth,{doc,runTransaction,serverTimestam
       if(!ma.exists()||!mb.exists())fail('Both players must belong to the group.','permission-denied');
       const now=serverTimestamp();
       const t={groupId:gid,playerA:uid,playerB:opponent,createdBy:uid,createdAt:now,playedAt:now,updatedAt:now,
-        status:'open',revision:1,version:1,turn:opponent,disputed:false,
+        mode,status:'open',revision:1,version:1,turn:opponent,disputed:false,
         proposal:{score,by:uid,note:message,at:now},finalScore:null,finalizedAt:null,cancellation:null,amendment:null,
         action:{id:aid,kind:'submitted',actor:uid}};
       writeAction(tx,gid,aid,aid,uid,'submitted',t,{kind:'submitted',actor:uid,score,note:message,at:now},opponent);

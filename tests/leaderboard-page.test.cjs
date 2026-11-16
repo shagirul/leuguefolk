@@ -1,6 +1,13 @@
 const test=require('node:test');
 const assert=require('node:assert/strict');
 
+test('skill ladder separates provisional estimates, never invents an official rank, and includes three views',async()=>{
+  const {renderLeaderboardPage}=await import('../public/leaderboard.mjs');
+  const html=renderLeaderboardPage({period:'skill',user:{uid:'new'},profile:{displayName:'New player'},members:[{id:'old',displayName:'Established'},{id:'new',displayName:'New player'}],scores:[{id:'old',score:1100,rank:1,played:15,wins:10,losses:5,provisional:false},{id:'new',score:1200,rank:null,played:1,wins:1,losses:0,provisional:true}]});
+  assert.match(html,/Club Skill Ladder/);assert.match(html,/Provisional players/);assert.match(html,/No official rank yet/);assert.match(html,/Provisional, New player, you, 1,200 skill/);
+  assert.doesNotMatch(html,/Rank 2, New player|leaderboard-podium"/);assert.equal((html.match(/role="tab"/g)||[]).length,3);
+});
+
 test('standings keep supplied ranking order, member avatars and a truthful own position',async()=>{
   const {renderLeaderboardPage}=await import('../public/leaderboard.mjs');
   const html=renderLeaderboardPage({user:{uid:'me'},profile:{displayName:'Rally_Ace',avatarId:'esfj-connector'},members:[{id:'friend',displayName:'Kai',avatarId:'estj-captain'},{id:'me',displayName:'Old name',avatarId:'enfp-spark'}],scores:[{id:'friend',score:6,played:2,wins:2},{id:'me',score:0,played:2,wins:0}],period:'monthly'});

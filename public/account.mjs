@@ -1,3 +1,4 @@
+import {buildRankedLedger} from './ratings.mjs';
 import {avatarFor,characterCard,playerAvatar} from './avatars.mjs';
 import {calculateAchievements,achievementStoneAsset} from './achievements.mjs';
 
@@ -26,14 +27,15 @@ export function bindScrollHeader(scroller){
 
 // The active group's complete ticket snapshot is already available offline and live.
 // Pending corrections retain their verified score until both players accept a change.
-export function summarizeProfile(tickets,uid){
+export function summarizeProfile(tickets,uid,{members=[],groupId,now=new Date()}={}){
   const matches=tickets.filter(t=>t.status==='finalized'&&t.playerA!==t.playerB&&[t.playerA,t.playerB].includes(uid)&&score(t.finalScore?.a)&&score(t.finalScore?.b))
     .map(t=>{const own=t.playerA===uid?t.finalScore.a:t.finalScore.b,opponent=t.playerA===uid?t.finalScore.b:t.finalScore.a;return {id:t.id,own,opponent,result:own>opponent?'W':own<opponent?'L':'D',at:time(t.createdAt)};})
     .sort((a,b)=>a.at-b.at||String(a.id||'').localeCompare(String(b.id||'')));
   const played=matches.length,wins=matches.filter(m=>m.result==='W').length,draws=matches.filter(m=>m.result==='D').length;
-  const points=matches.reduce((sum,m)=>sum+m.own,0),pointsConceded=matches.reduce((sum,m)=>sum+m.opponent,0),xp=points*2;
+  const points=matches.reduce((sum,m)=>sum+m.own,0),pointsConceded=matches.reduce((sum,m)=>sum+m.opponent,0);
+  const skill=buildRankedLedger({tickets,members:members.some(m=>m.id===uid)?members:[...members,{id:uid}],groupId,now}).players.get(uid);
   let streak=0,bestStreak=0;for(const match of matches){streak=match.result==='W'?streak+1:0;bestStreak=Math.max(bestStreak,streak);}
-  return {played,wins,draws,losses:played-wins-draws,winRate:played?Math.round(wins/played*100):0,pointsScored:points,pointsConceded,pdRatio:pointsConceded?points/pointsConceded:points?Infinity:null,xp,level:1+Math.floor(xp/100),levelProgress:xp%100,toNext:100-xp%100,bestStreak,averageScore:played?Math.round(points/played):0,recent:matches.slice(-5).reverse()};
+  return {played,wins,draws,losses:played-wins-draws,winRate:played?Math.round(wins/played*100):0,pointsScored:points,pointsConceded,pdRatio:pointsConceded?points/pointsConceded:points?Infinity:null,skill:skill.skill,mu:skill.mu,sigma:skill.sigma,rankedPlayed:skill.rankedPlayed,provisional:skill.provisional,bestStreak,averageScore:played?Math.round(points/played):0,recent:matches.slice(-5).reverse()};
 }
 
 export const accountAchievements=context=>calculateAchievements(context);
@@ -87,8 +89,8 @@ export function renderLeagueNavigation(active='profile'){
   return `<nav class="account-nav" aria-label="Main navigation">${[['leaderboard','trophy','Ranks'],['matches','activity','Matches'],['matchups','users','Matchups'],['profile','user','Profile']].map(([view,icon,label])=>`<button class="${view===active?'is-active':''}" data-action="nav" data-view="${view}" aria-label="${label}" ${view===active?'aria-current="page"':''}>${accountIcon(icon)}<span>${label}</span></button>`).join('')}</nav>`;
 }
 
-function levelRail(stats){
-  return `<section class="account-level-rail" aria-label="Level milestones"><div class="account-current-level"><span class="account-level-gem">${accountIcon('gem')}</span><strong>Level ${stats.level}</strong><small>${stats.xp} XP earned</small></div><div class="account-level-steps">${Array.from({length:5},(_,i)=>`<div class="account-level-step ${i===0?'is-current':''}" aria-label="Level ${stats.level+i}${i===0?', current':', locked'}"><span>L${stats.level+i}</span>${accountIcon('gem')}<small>${(stats.level+i-1)*100} XP</small></div>`).join('')}</div></section>`;
+function skillCard(stats){
+  return '<section class="account-skill-card"><div><span>Club Skill Rating</span><strong>'+stats.skill+'</strong></div><p>'+(stats.provisional?'Provisional · '+stats.rankedPlayed+' eligible matches. At least 5 and sufficient confidence are needed for an official skill rank.':'Established · '+stats.rankedPlayed+' eligible matches')+'</p></section>';
 }
 function achievementsContent(achievements,isOwn=true){
   const unlocked=achievements.filter(a=>a.unlocked).length;
@@ -110,17 +112,17 @@ function statsContent(stats){
 export function renderAccountPage({profile,user,group,members=[],tickets=[],tab='achievements',backendEnabled=true,online=true,unread=false,dialog='',viewerUid=user?.uid}){
   const isOwn=viewerUid===user.uid;
   const scopedTickets=tickets.filter(t=>(!group?.id||t.groupId===group.id)&&(!t.sportId||t.sportId==='table-tennis'));
-  const stats=summarizeProfile(scopedTickets,user.uid),achievements=accountAchievements({tickets:scopedTickets,uid:user.uid,groupId:group?.id,members}),name=profile.displayName||'Player';
+  const stats=summarizeProfile(scopedTickets,user.uid,{members,groupId:group?.id}),achievements=accountAchievements({tickets:scopedTickets,uid:user.uid,groupId:group?.id,members}),name=profile.displayName||'Player';
   const character=avatarFor(profile.avatarId),artRatio=((512-character.artBounds[1])/512*character.artScale).toFixed(5);
   const activeTab=tab==='stats'?'stats':'achievements';
   return `<div class="account-page">${renderLeagueHeader({title:isOwn?'Profile':'Player profile',back:!isOwn,group:backendEnabled?group:null,unread})}<main class="account-body" aria-label="Welcome, ${esc(name)}">
-    <section class="account-hero" style="--profile-art-ratio:${artRatio}" aria-label="${isOwn?'Your player':esc(name)}">${isOwn?`<button class="account-character" data-action="editProfile" aria-label="Change character">${characterCard(character.id)}<span class="account-avatar-edit">${accountIcon('pencil')}</span></button>`:`<div class="account-character is-readonly">${characterCard(character.id)}</div>`}<div class="account-identity"><h2 title="${esc(name)}">${esc(name)}</h2><div class="account-character-meta"><button class="account-character-badge" data-action="characterInfo" data-character-id="${character.id}" aria-label="About ${esc(character.name)}" aria-expanded="false"><span class="account-character-badge-surface"><span>${esc(character.name)}</span>${accountIcon('info')}</span></button><div id="characterTooltip" class="account-character-tooltip" role="tooltip" aria-live="polite" aria-atomic="true" hidden>“${esc(character.description)}”</div></div><div class="account-level-meta"><strong>Level ${stats.level}</strong><span>${stats.xp} XP</span></div><div class="account-progress" role="progressbar" aria-label="Level progress" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${stats.levelProgress}"><span style="width:${stats.levelProgress}%"></span></div><p class="account-progress-caption">${stats.toNext} XP to level ${stats.level+1}</p></div></section>
+    <section class="account-hero" style="--profile-art-ratio:${artRatio}" aria-label="${isOwn?'Your player':esc(name)}">${isOwn?`<button class="account-character" data-action="editProfile" aria-label="Change character">${characterCard(character.id)}<span class="account-avatar-edit">${accountIcon('pencil')}</span></button>`:`<div class="account-character is-readonly">${characterCard(character.id)}</div>`}<div class="account-identity"><h2 title="${esc(name)}">${esc(name)}</h2><div class="account-character-meta"><button class="account-character-badge" data-action="characterInfo" data-character-id="${character.id}" aria-label="About ${esc(character.name)}" aria-expanded="false"><span class="account-character-badge-surface"><span>${esc(character.name)}</span>${accountIcon('info')}</span></button><div id="characterTooltip" class="account-character-tooltip" role="tooltip" aria-live="polite" aria-atomic="true" hidden>“${esc(character.description)}”</div></div><div class="account-skill-meta"><span>Skill Rating</span><strong>${stats.skill.toLocaleString('en-IN')}</strong><small>${stats.provisional?'Provisional':'Established'}</small></div></div></section>
     <section class="account-highlights" aria-label="Match statistics">${[[stats.played,'Total matches','matches-played',`${stats.played} verified matches`],[stats.played?stats.winRate+'%':'—','Win ratio','win-ratio','Wins ÷ total verified matches'],[stats.pdRatio===null?'—':stats.pdRatio===Infinity?'∞':stats.pdRatio.toFixed(2),'P/D ratio','pd-ratio',`Points scored ÷ points conceded · ${stats.pointsScored} ÷ ${stats.pointsConceded}. Higher means you score more while conceding fewer.`]].map(([value,label,icon,hint])=>`<div class="account-highlight" title="${esc(hint)}"><img src="/assets/stats/${icon}.png" width="44" height="44" alt=""><div><strong>${value}</strong><small>${label}</small></div></div>`).join('')}</section>
     <p class="account-scope">${group?'All-time verified matches':'Your verified match stats appear here'}${online?'':' · Offline'}</p>
     <div class="account-tabs" role="tablist" aria-label="Profile sections">${[['stats',isOwn?'My stats':'Stats'],['achievements','Achievements']].map(([value,label])=>`<button id="account-tab-${value}" role="tab" aria-selected="${activeTab===value}" aria-controls="account-tab-panel" tabindex="${activeTab===value?0:-1}" data-action="profileTab" data-value="${value}">${label}</button>`).join('')}</div>
-    <section id="account-tab-panel" role="tabpanel" aria-labelledby="account-tab-${activeTab}">${activeTab==='achievements'?achievementsContent(achievements,isOwn):levelRail(stats)+statsContent(stats)}</section>
+    <section id="account-tab-panel" role="tabpanel" aria-labelledby="account-tab-${activeTab}">${activeTab==='achievements'?achievementsContent(achievements,isOwn):skillCard(stats)+statsContent(stats)}</section>
     ${isOwn&&backendEnabled&&group?`<button class="account-group-row" data-action="accountInvite"><span class="league-group-avatars" aria-hidden="true">${members.length?members.slice(0,3).map(m=>playerAvatar(m.id===user.uid?profile.avatarId:m.avatarId)).join(''):`<span class="league-group-symbol">${esc(groupInitials(group.name))}</span>`}</span><span class="account-group-copy"><strong>${esc(group.name)}</strong><small>${members.length?`${members.length} ${members.length===1?'player':'players'} · `:''}Invite friends</small></span><span class="account-group-invite" aria-hidden="true">${accountIcon('share')}</span></button>`:''}
-    <p class="account-fine-print">${group?'Stats and achievements are for this group. ':''}Every 100 verified XP adds a level.</p>
+    <p class="account-fine-print">${group?'Stats and achievements are for this group. ':''}Skill is relative to this club. Only eligible ranked results affect it; casual games remain in your match history.</p>
     ${isOwn?`<button class="account-sign-out" data-action="logout">Sign out</button>`:`<div class="player-profile-actions"><button class="btn secondary" data-action="openMatchup" data-id="${esc(user.uid)}">Your matchup</button><button class="btn" data-action="recordOpponent" data-id="${esc(user.uid)}">Record match</button></div>`}
     </main>${backendEnabled?renderLeagueNavigation(isOwn?'profile':''):''}</div>${dialog}`;
 }

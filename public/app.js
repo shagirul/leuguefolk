@@ -3,7 +3,7 @@ import {buildAcceptancePlan,queueAcceptancePlan} from '/bulk-accept.mjs';
 import {renderMatchesContent,renderInboxContent,matchNeedsYou,mountMatchSwipes} from '/activity.mjs';
 import {suggestedOpponents,standardGameScore,renderMatchComposer,mountMatchComposer,bindQuickOpponents} from '/record-match.mjs';
 import {replayOutbox} from '/outbox.mjs';
-import {competitionStandings,competitionPoints} from '/domain.mjs';
+import {competitionStandings,buildRankedLedger} from '/domain.mjs';
 import {initializeApp} from 'https://www.gstatic.com/firebasejs/12.19.0/firebase-app.js';
 import {getAuth,connectAuthEmulator,GoogleAuthProvider,signInWithPopup,createUserWithEmailAndPassword,signInWithEmailAndPassword,sendPasswordResetEmail,signOut,onAuthStateChanged,updateProfile} from 'https://www.gstatic.com/firebasejs/12.19.0/firebase-auth.js';
 import {getFirestore,connectFirestoreEmulator,doc,collection,onSnapshot,getDoc,getDocs,updateDoc,runTransaction,serverTimestamp,increment,query,orderBy,limit,initializeFirestore,persistentLocalCache,persistentMultipleTabManager} from 'https://www.gstatic.com/firebasejs/12.19.0/firebase-firestore.js';
@@ -83,7 +83,21 @@ function shell(title,content,active='leaderboard',back=false){
     <main class="account-body activity-body">${content}</main>
     ${renderLeagueNavigation(active)}</div>${state.dialog?modal():''}`;
 }
-function statFor(period){return competitionStandings(state.members,state.tickets,period);}
+let rankedCache=null;
+function rankingLedger(){
+  const minute=Math.floor(Date.now()/60000);
+  if(!rankedCache||rankedCache.members!==state.members||rankedCache.tickets!==state.tickets||rankedCache.groupId!==state.groupId||rankedCache.minute!==minute)rankedCache={members:state.members,tickets:state.tickets,groupId:state.groupId,minute,ledger:buildRankedLedger({members:state.members,tickets:state.tickets,groupId:state.groupId||undefined})};
+  return rankedCache.ledger;
+}
+function statFor(period){return competitionStandings(state.members,state.tickets,period,new Date(),rankingLedger());}
+function rankedMatchSummary(t){
+  const event=rankingLedger().events.find(e=>e.ticketId===t.id);
+  if(!event?.eligible)return note('',event?.reason==='pair-limit'?'Weekly ranked limit reached for this pair. This result stays in your match history, without skill or competition points.':'Casual match · No skill or competition points.');
+  return '<section class="soft-card"><strong>Ranked result</strong><div class="stat-row" style="margin-top:12px">'+[t.playerA,t.playerB].map(id=>{
+    const before=Math.round(1000+10*(event.before[id].mu-25)),after=Math.round(1000+10*(event.after[id].mu-25)),delta=after-before;
+    return '<div class="stat"><big>+'+event.points[id]+' pts</big><small>'+esc(userName(id))+'</small><small>Skill '+(delta>=0?'+':'')+delta+' · '+Math.round(event.winChance[id]*100)+'% pre-match chance</small></div>';
+  }).join('')+'</div></section>';
+}
 function leaderboardScreen(){return renderLeaderboardPage({scores:statFor(state.period),members:state.members,user:state.user,profile:state.profile,group:state.group,period:state.period,online:state.online,queue:state.queue,unread:state.notifications.some(n=>!n.readAt),dialog:state.dialog?modal():''});}
 function status(t){if(t.status==='cancelled')return badge('Cancelled','red');if(t.status==='finalized')return t.amendment?badge('Change pending','amber'):badge('Verified','green');if(t.cancellation)return badge('Cancel requested','amber');if(t.disputed)return badge('Disputed','red');if(t.revision>1)return badge('Correction proposed','purple');return badge('Awaiting review','amber');}
 function ticketsContent(){return renderMatchesContent({tickets:state.tickets,members:state.members,profile:state.profile,user:state.user,queue:state.queue,tab:state.matchTab,bulkBusy:state.bulkAcceptBusy});}
@@ -95,11 +109,12 @@ function ticketContent(t){if(!t)return `${note('error','This match is not availa
   const score=t.finalScore||t.proposal?.score;
   const pendingLocal=state.queue.find(q=>q.payload?.ticketId===t.id&&q.status!=='blocked');
   let body=`<div class="activity-ticket-meta"><span>${dateShort(t.createdAt)}</span>${status(t)}</div><div class="match-review-card">${scoreView(t,score)}<div class="small quiet text-center">${t.status==='finalized'?'Both agreed • Official result':t.status==='cancelled'?'Match cancelled':`Last proposed by ${esc(userName(t.proposal.by))}`}</div></div>`;
+  body+=`<p class="tiny quiet">${t.mode==='casual'?'Casual · No skill or competition points':'Ranked · Weekly pair limits apply'}</p>`;
   if(pendingLocal)body+=note('warn','Your last action is queued on this device. Its result will appear after the server confirms it. You cannot submit another response until then.');
   if(t.status==='open'&&!pendingLocal){
     if(t.cancellation){body+=note('warn',`${esc(userName(t.cancellation.by))} requested to cancel this match.${t.cancellation.note?' Reason: '+esc(t.cancellation.note):''}`);
       body+=myTurn?`${button('Agree to cancel','acceptCancel')}${button('Keep this match open','declineCancel','outline')}`:note('','Waiting for the other player to respond to cancellation.');
-    }else if(myTurn){body+=note('','Check both scores carefully. Approving makes this result official. A win earns 3 league points.');
+    }else if(myTurn){body+=note('','Check both scores carefully. Approving makes this result official. Eligible ranked wins earn 3–5 competition points. Casual games do not change skill.');
       body+=`${button('✓ Confirm this score','confirm')}${button('Suggest a different score','suggest','secondary')}${button('Disagree / discuss','dispute','outline')}`;
     }else{body+=note('warn',`Waiting for <strong>${esc(userName(t.turn))}</strong> to review this score. They can confirm or propose a correction.`);
       if(t.playerA===state.user.uid&&t.revision===1)body+=button('Edit my original submission','editOriginal','secondary');
@@ -110,7 +125,7 @@ function ticketContent(t){if(!t)return `${note('error','This match is not availa
     }
   }
   if(t.status==='finalized'){
-    body+=`<div class="soft-card"><div class="row between"><span class="member-name">League points</span>${badge('Verified','green')}</div><div class="stat-row" style="margin-top:12px"><div class="stat"><big>+${competitionPoints(t,t.playerA)}</big><small>${esc(userName(t.playerA))}</small></div><div class="stat"><big>+${competitionPoints(t,t.playerB)}</big><small>${esc(userName(t.playerB))}</small></div></div></div>`;
+    body+=rankedMatchSummary(t);
     if([t.playerA,t.playerB].includes(state.user.uid)){
       const matchup=matchupStats(state.tickets,state.user.uid,other(t),state.groupId);
       const milestone=matchup.history.find(m=>m.result==='W')?.id===t.id?'First verified win against '+name:matchup.last?.id===t.id&&matchup.streak>=2?matchup.streak+' consecutive '+(matchup.streakResult==='W'?'wins':'losses')+' in this matchup':'';
@@ -168,7 +183,7 @@ function modal(){const d=state.dialog||{},t=state.tickets.find(t=>t.id===d.ticke
     const plan=d.plan;
     inner=`<h2>Accept ${plan.items.length} scores?</h2><p>Confirm these exact scores. Changed requests will stay for review.${state.online?'':' Confirmations will queue until you reconnect.'}</p><ul class="bulk-score-review">${plan.items.map(item=>{const opponent=item.playerA===plan.uid?item.playerB:item.playerA,own=item.playerA===plan.uid?item.score.a:item.score.b,otherScore=item.playerA===plan.uid?item.score.b:item.score.a;return `<li>${playerAvatar(userAvatar(opponent))}<span><strong>${esc(userName(opponent))}</strong><small>You · Opponent</small></span><b>${own}<i>–</i>${otherScore}</b></li>`;}).join('')}</ul>${state.tickets.filter(needsMe).length>plan.items.length?'<p class="bulk-review-note">Cancellations, disputes and verified-score changes are reviewed individually.</p>':''}${button(state.bulkAcceptBusy?'Accepting…':'Accept '+plan.items.length+' scores','commitAcceptAll','',state.bulkAcceptBusy?'disabled':'')}${button('Cancel','closeDialog','ghost',state.bulkAcceptBusy?'disabled':'')}`;
   }
-  if(kind==='confirmAction'&&t){inner=`<h2>Confirm this match?</h2><p>A verified win earns 3 points. ${state.online?"This score counts after the server confirms it.":"Your confirmation will be queued until you reconnect."}</p>${scoreView(t,t.proposal.score)}${button('Confirm exact score','commitConfirm')}${close}`;}
+  if(kind==='confirmAction'&&t){inner=`<h2>Confirm this match?</h2><p>Eligible ranked wins earn 3–5 competition points; casual games change no rating. ${state.online?"This score counts after the server confirms it.":"Your confirmation will be queued until you reconnect."}</p>${scoreView(t,t.proposal.score)}${button('Confirm exact score','commitConfirm')}${close}`;}
   if(kind==='enablePush')inner=`<h2>Turn on notifications</h2><p>Only enable if you want match requests and upcoming group updates delivered to this device. Tapping any match notification opens its exact match.</p>${button('Enable notifications','commitPush')}${close}`;
   return `<div class="modal-backdrop" data-action="backdrop"><section class="modal league-dialog ${['accountSettings','accountInvite','accountAchievement','editProfile','groupSwitch'].includes(kind)?'account-dialog':''}" role="dialog" aria-modal="true" aria-label="${esc(({acceptAll:'Accept scores',accountSettings:'Account settings',accountInvite:'Invite friends',accountAchievement:'Achievement details',editProfile:'Change character',groupSwitch:'Choose a group'})[kind]||kind)}"><button type="button" class="modal-handle" data-action="closeDialog" aria-label="Close drawer; drag down to dismiss" ${state.bulkAcceptBusy?'disabled':''}><span></span></button>${inner}</section></div>`;
 }
@@ -542,7 +557,7 @@ document.addEventListener('click',async e=>{
     else if(action==='switchGroup'){state.dialog=null;navigate(`/g/${id}/leaderboard`);}
     else if(action==='closeDialog'){state.dialog=null;render();}
     else if(action==='backdrop'&&e.target===b){state.dialog=null;render();}
-    else if(action==='period'&&['weekly','monthly'].includes(b.dataset.value)){state.period=b.dataset.value;render();document.querySelector?.('#leaderboard-tab-'+state.period)?.focus?.({preventScroll:true});}
+    else if(action==='period'&&['skill','weekly','monthly'].includes(b.dataset.value)){state.period=b.dataset.value;render();document.querySelector?.('#leaderboard-tab-'+state.period)?.focus?.({preventScroll:true});}
     else if(action==='acceptAll')openAcceptAll();
     else if(action==='commitAcceptAll')await commitAcceptAll();
     else if(action==='matchTab'){state.matchTab=b.dataset.value;render();document.querySelector?.('#match-tab-'+state.matchTab)?.focus?.({preventScroll:true});}
@@ -590,7 +605,7 @@ document.addEventListener('keydown',e=>{
   const tab=e.target.closest?.('.account-tabs [role="tab"]');
   const periodTab=e.target.closest?.('.leaderboard-periods [role="tab"]');
   if(tab&&['ArrowLeft','ArrowRight','Home','End'].includes(e.key)){e.preventDefault();state.profileTab=e.key==='Home'?'stats':e.key==='End'?'achievements':state.profileTab==='stats'?'achievements':'stats';render();document.querySelector?.('#account-tab-'+state.profileTab)?.focus?.();}
-  else if(periodTab&&['ArrowLeft','ArrowRight','Home','End'].includes(e.key)){e.preventDefault();state.period=e.key==='Home'?'weekly':e.key==='End'?'monthly':state.period==='weekly'?'monthly':'weekly';render();document.querySelector?.('#leaderboard-tab-'+state.period)?.focus?.({preventScroll:true});}
+  else if(periodTab&&['ArrowLeft','ArrowRight','Home','End'].includes(e.key)){e.preventDefault();const periods=['skill','weekly','monthly'];state.period=e.key==='Home'?'skill':e.key==='End'?'monthly':periods[(periods.indexOf(state.period)+(e.key==='ArrowRight'?1:2))%3];render();document.querySelector?.('#leaderboard-tab-'+state.period)?.focus?.({preventScroll:true});}
   else if(e.key==='Escape'&&['accountSettings','accountInvite','accountAchievement','editProfile','groupSwitch'].includes(state.dialog?.kind)){const groupSwitch=state.dialog.kind==='groupSwitch';state.dialog=null;render();document.querySelector?.(groupSwitch?'[data-action="groupSwitch"]':'[data-action="accountSettings"]')?.focus?.({preventScroll:true});}
 });
 document.addEventListener('input',preserveDraft);document.addEventListener('change',preserveDraft);
@@ -632,7 +647,7 @@ document.addEventListener('submit',async e=>{
         return t.playerA===state.user.uid?(score?.a===a&&score?.b===b):(score?.a===b&&score?.b===a);
       });
       if(possibleDuplicate&&!confirm('A match with the same opponent and score was recorded recently. Is this a NEW match?'))return;
-      const actionId=uid();await saveOutbox({id:actionId,uid:state.user.uid,kind:'submitMatch',payload:{groupId:state.groupId,actionId,opponentUid:d.opponentUid,scoreSelf:a,scoreOpponent:b,note:d.note}});
+      const actionId=uid();await saveOutbox({id:actionId,uid:state.user.uid,kind:'submitMatch',payload:{groupId:state.groupId,actionId,opponentUid:d.opponentUid,scoreSelf:a,scoreOpponent:b,mode:d.mode||'ranked',note:d.note}});
       state.matchTab='sent';go('matches');
     }else if(form.id==='scoreForm'){
       const t=state.tickets.find(v=>v.id===state.dialog?.ticketId);

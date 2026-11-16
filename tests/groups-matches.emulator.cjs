@@ -142,7 +142,7 @@ test('direct Firestore group and match workflow is authorized by deployed-style 
     await t.test('invite holders can read at most 20 preview records per query, with private group data still denied',async()=>{
       const players=collection(outsider.store,'inviteCodes',code,'players');
       const preview=await getDocs(query(players,orderBy('xp','desc'),orderBy('wins','desc'),orderBy('displayName'),limit(20)));
-      assert.equal(preview.size,3);assert.ok(preview.docs[0].data().xp>0);
+      assert.equal(preview.size,3);assert.equal(preview.docs[0].data().xp,0);
       await denied(getDocs(players));await denied(getDocs(query(players,limit(21))));
       await denied(getDocs(collection(outsider.store,'groups',gid,'members')));
       await denied(getDocs(collection(outsider.store,'groups',gid,'tickets')));
@@ -163,8 +163,21 @@ test('direct Firestore group and match workflow is authorized by deployed-style 
         assert.equal((await backfillGroup(db,ref,{write:true})).players,3);
         const tid=await submit();await mutate(bob,tid,'confirm');
         const after=(await getDocFromServer(doc(alice.store,'inviteCodes',code,'players',alice.user.uid))).data();
-        assert.equal(after.xp,before.xp+42);
+        assert.equal(after.xp,0);
       }finally{await deleteAdminApp(admin);}
+    });
+    await t.test('ranked/casual mode is immutable, casual results award no skill, and clients cannot write ratings',async()=>{
+      const tid=randomUUID();await alice.call('submitMatch',{groupId:gid,actionId:tid,opponentUid:bob.user.uid,scoreSelf:11,scoreOpponent:8,mode:'casual'});
+      const old=await current(bob,tid),proposal={score:{a:9,b:11},by:bob.user.uid,note:'',at:serverTimestamp()};
+      assert.equal(old.mode,'casual');
+      await denied(forge(bob,tid,'propose',{mode:'ranked',revision:2,proposal,turn:alice.user.uid}));
+      await denied(forge(bob,tid,'propose',{mu:9999,revision:2,proposal,turn:alice.user.uid}));
+      await denied(updateDoc(doc(alice.store,'users',alice.user.uid),{skill:9999,updatedAt:serverTimestamp()}));
+      await mutate(bob,tid,'confirm');
+      const {buildRankedLedger}=await import('../public/ratings.mjs');
+      const ledger=buildRankedLedger({tickets:[{id:tid,...await current(alice,tid)}],members:[{id:alice.user.uid},{id:bob.user.uid}],groupId:gid});
+      assert.equal(ledger.events[0].reason,'casual');assert.equal(ledger.players.get(alice.user.uid).skill,1000);
+      await assert.rejects(alice.call('submitMatch',{groupId:gid,actionId:randomUUID(),opponentUid:bob.user.uid,scoreSelf:11,scoreOpponent:8,mode:'bonus'}),/ranked or casual/);
     });
   }finally{await Promise.all(apps.map(deleteApp));}
 });

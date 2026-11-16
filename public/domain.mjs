@@ -1,3 +1,5 @@
+import {periodKeys} from './periods.mjs';
+import {buildRankedLedger,championshipStandings,skillStandings} from './ratings.mjs';
 'use strict';
 // Pure state-machine logic (also tested independently; no Firebase dependency).
 const MAX_SCORE = 200;
@@ -96,32 +98,12 @@ function advance(t, kind, actor, input, now) {
   }
   return {next,event,target,title,body};
 }
-function periodKeys(date,zone='Asia/Kolkata'){
-  const parts=Object.fromEntries(new Intl.DateTimeFormat('en-CA',{timeZone:zone,year:'numeric',month:'2-digit',day:'2-digit'}).formatToParts(date).filter(x=>x.type!=='literal').map(x=>[x.type,x.value]));
-  const t=new Date(Date.UTC(+parts.year,+parts.month-1,+parts.day));
-  const monday=(t.getUTCDay()+6)%7; t.setUTCDate(t.getUTCDate()-monday);
-  return {monthKey:`${parts.year}-${parts.month}`,weekKey:t.toISOString().slice(0,10)};
+// All standings replay the same verified, eligibility-filtered ranked ledger.
+function competitionPoints(t,uid,ledger){
+  if(!ledger)fail('Competition points require the complete ranked ledger.','invalid-argument');
+  return ledger.events.find(e=>e.ticketId===String(t.id))?.points[uid]||0;
 }
-function scorePoints(score){return score*2;}
-// Competition points come from wins, never from the number of rallies scored.
-function competitionPoints(t,uid){
-  if(t?.status!=='finalized'||!t.finalScore)return 0;
-  return (uid===t.playerA&&t.finalScore.a>t.finalScore.b)||(uid===t.playerB&&t.finalScore.b>t.finalScore.a)?3:0;
+function competitionStandings(members,tickets,period='weekly',now=new Date(),ledger=buildRankedLedger({members,tickets,now})){
+  return period==='skill'?skillStandings(members,ledger):championshipStandings(members,ledger,period,now);
 }
-function competitionStandings(members,tickets,period='weekly',now=new Date()){
-  const key=period==='monthly'?'monthKey':'weekKey',season=periodKeys(now)[key];
-  const rows=new Map(members.map(m=>[m.id,{id:m.id,name:m.displayName||'Player',score:0,played:0,wins:0,losses:0,draws:0}]));
-  for(const t of tickets){
-    const at=t.createdAt?.toDate?.()||new Date(t.createdAt||0);
-    if(t.status!=='finalized'||!t.finalScore||!Number.isFinite(+at)||periodKeys(at)[key]!==season)continue;
-    for(const id of [t.playerA,t.playerB]){
-      const row=rows.get(id);if(!row)continue;
-      const points=competitionPoints(t,id),draw=t.finalScore.a===t.finalScore.b;
-      row.score+=points;row.played++;row.wins+=points===3?1:0;row.draws+=draw?1:0;row.losses+=!points&&!draw?1:0;
-    }
-  }
-  const sorted=[...rows.values()].sort((a,b)=>b.score-a.score||a.name.localeCompare(b.name)||a.id.localeCompare(b.id));
-  sorted.forEach((row,i)=>{row.rank=i&&row.score===sorted[i-1].score?sorted[i-1].rank:i+1;});
-  return sorted;
-}
-export {advance,periodKeys,scorePoints,competitionPoints,competitionStandings,validScore,note,other,fail};
+export {advance,periodKeys,competitionPoints,competitionStandings,buildRankedLedger,validScore,note,other,fail};

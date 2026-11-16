@@ -1,56 +1,34 @@
-import {periodKeys} from './domain.mjs';
+import {periodKeys} from './periods.mjs';
+import {buildRankedLedger,championshipStandings} from './ratings.mjs';
 
 // Presentation state is separate from the six stable achievement identities.
 export const LOCKED_ACHIEVEMENT_ASSET='locked_placeholder.png';
 export const achievementStoneAsset=achievement=>achievement.unlocked?achievement.asset:LOCKED_ACHIEVEMENT_ASSET;
 
 export const ACHIEVEMENT_CATALOG=Object.freeze([
-  {id:'whitewash',name:'Whitewash',asset:'01_whitewash.png',description:'A perfect victory. Not a single point conceded.',rule:'Win one verified table tennis game exactly 11–0.',reset:'Each qualifying game earns one stone. Other results do not reset your collection.',unit:'perfect games',target:1,noProgress:true},
+  {id:'whitewash',name:'Whitewash',asset:'01_whitewash.png',description:'A perfect victory. Not a single point conceded.',rule:'Win one eligible ranked table tennis game exactly 11–0.',reset:'Each qualifying game earns one stone. Other results do not reset your collection.',unit:'perfect games',target:1,noProgress:true},
   {id:'untouchable',name:'The Untouchable',asset:'02_the_untouchable.png',description:'Five victories. Zero defeats.',rule:'Win 5 ranked matches in a row against any opponents.',reset:'A loss or draw resets this streak. Casual games do not affect it. Every separate block of 5 wins earns a stone.',unit:'consecutive wins',target:5},
   {id:'rival-dominator',name:'Rival Dominator',asset:'03_rival_dominator.png',description:'One opponent. Five consecutive victories.',rule:'Beat the same opponent in 5 consecutive ranked meetings. You can play other people in between.',reset:'A loss or draw against that opponent resets only their streak. Every separate block of 5 wins earns a stone.',unit:'wins against one rival',target:5},
-  {id:'three-peat',name:'Three-Peat',asset:'04_three_peat.png',description:'Three weeks. Three championships. One champion.',rule:'Finish as the sole weekly points leader for 3 consecutive completed weeks in this club.',reset:'A week with no sole champion, no games, or another champion breaks the streak. Every separate run of 3 weeks earns a stone.',unit:'consecutive weeks',target:3},
+  {id:'three-peat',name:'Three-Peat',asset:'04_three_peat.png',description:'Three weeks. Three championships. One champion.',rule:'Win the weekly championship for 3 consecutive completed weeks. Each week needs 2 eligible ranked matches and 2 opponents in a 3+ player club; tied leaders do not qualify.',reset:'A week with no sole champion, no games, or another champion breaks the streak. Every separate run of 3 weeks earns a stone.',unit:'consecutive weeks',target:3},
   {id:'table-conqueror',name:'Table Conqueror',asset:'05_table_conqueror.png',description:'Every opponent defeated. Not a single loss.',rule:'Beat every eligible club opponent during one unbeaten ranked run. You need at least 2 different opponents.',reset:'A ranked loss resets this attempt. Draws do not add opponents or reset it. The opponent list is fixed at your first win. After earning a stone, a new attempt begins.',unit:'opponents defeated',target:2},
   {id:'perfect-reign',name:'Perfect Reign',asset:'06_perfect_reign.png',description:'An undefeated champion. An undisputed reign.',rule:'Finish a week as the sole points leader with at least 3 ranked wins, victories over 2 different opponents, and no losses.',reset:'A ranked loss rules out the current week. Each new week is a fresh attempt; tied leaders do not earn a championship stone.',unit:'requirements met',target:4}
 ]);
 
 const stamp=value=>{const n=+(value?.toDate?.()||new Date(value??NaN));return Number.isFinite(n)?n:null;};
-const validScore=n=>Number.isInteger(n)&&n>=0&&n<=200;
 const weekStamp=key=>Date.parse(key+'T00:00:00Z');
 const day=86400000,week=7*day;
 const nextWeek=key=>new Date(weekStamp(key)+week).toISOString().slice(0,10);
 const closeAt=key=>Date.parse(nextWeek(key)+'T00:00:00+05:30');
-const ranked=t=>t.mode!=='casual'&&t.ranked!==false;
 
-function normalizedTickets(tickets,groupId,now){
-  // A ticket's latest version is authoritative; repeated snapshots are not events.
-  const unique=new Map();
-  for(const t of tickets){
-    if(!groupId||t.groupId!==groupId||!t.id||!t.playerA||!t.playerB||t.playerA===t.playerB||t.sportId&&t.sportId!=='table-tennis')continue;
-    const old=unique.get(t.id),newer=!old||(+t.version||0)>(+old.version||0)||((+t.version||0)===(+old.version||0)&&(stamp(t.updatedAt)||0)>=(stamp(old.updatedAt)||0));
-    if(newer)unique.set(t.id,t);
-  }
-  return [...unique.values()].filter(t=>t.status==='finalized'&&validScore(t.finalScore?.a)&&validScore(t.finalScore?.b))
-    .map(t=>({...t,at:stamp(t.playedAt)??stamp(t.createdAt),seasonAt:stamp(t.createdAt)}))
-    .filter(t=>t.at!==null&&t.at<=now&&t.seasonAt!==null&&t.seasonAt<=now)
-    .sort((a,b)=>a.at-b.at||String(a.id).localeCompare(String(b.id)));
-}
-
-function weekResult(tickets,uid){
-  const scores=new Map(),own={wins:0,losses:0,draws:0,opponents:new Set()};
-  for(const t of tickets){
-    const {a,b}=t.finalScore,winner=a>b?t.playerA:b>a?t.playerB:null;
-    for(const id of [t.playerA,t.playerB])scores.set(id,(scores.get(id)||0)+(id===winner?3:0));
-    if(t.playerA===uid||t.playerB===uid){
-      if(winner===uid){own.wins++;own.opponents.add(t.playerA===uid?t.playerB:t.playerA);}
-      else if(winner)own.losses++;else own.draws++;
-    }
-  }
-  const top=Math.max(0,...scores.values()),leaders=[...scores].filter(([,score])=>score===top).map(([id])=>id);
-  return {...own,champion:top>0&&leaders.length===1?leaders[0]:null,rank:scores.has(uid)?1+[...scores.values()].filter(score=>score>(scores.get(uid)||0)).length:null,points:scores.get(uid)||0};
+function weekResult(tickets,uid,members,ledger,at){
+  const standings=championshipStandings(members,ledger,'weekly',new Date(at)),row=standings.find(p=>p.id===uid);
+  const own={wins:row?.wins||0,losses:row?.losses||0,draws:row?.draws||0,opponents:new Set()};
+  for(const t of tickets)if((t.playerA===uid&&t.finalScore.a>t.finalScore.b)||(t.playerB===uid&&t.finalScore.b>t.finalScore.a))own.opponents.add(t.playerA===uid?t.playerB:t.playerA);
+  return {...own,champion:standings.find(p=>p.champion)?.id||null,rank:row?.rank||null,points:row?.score||0};
 }
 
 export function calculateAchievements({tickets=[],uid,groupId,members=[],now=new Date()}={}){
-  const current=stamp(now)??Date.now(),all=normalizedTickets(tickets,groupId,current),own=all.filter(t=>[t.playerA,t.playerB].includes(uid)).map(t=>{
+  const current=stamp(now)??Date.now(),ledger=buildRankedLedger({tickets,members,groupId,now:new Date(current)}),eligible=new Set(ledger.events.filter(e=>e.eligible).map(e=>e.id)),all=ledger.history.filter(t=>eligible.has(t.id)).map(t=>({...t,seasonAt:t.at})),own=all.filter(t=>[t.playerA,t.playerB].includes(uid)).map(t=>{
     const a=t.playerA===uid,ownScore=a?t.finalScore.a:t.finalScore.b,otherScore=a?t.finalScore.b:t.finalScore.a;
     return {...t,ownScore,otherScore,opponentId:a?t.playerB:t.playerA,result:ownScore>otherScore?'W':ownScore<otherScore?'L':'D'};
   }),byId=new Map(members.map(m=>[m.id,m]));
@@ -62,7 +40,6 @@ export function calculateAchievements({tickets=[],uid,groupId,members=[],now=new
   for(const t of own){
     // A legacy exact 11–0 is a single standard game. Explicit other formats are excluded.
     if(t.ownScore===11&&t.otherScore===0&&(!t.format||['singles-11','single-game-11','standard-11','single'].includes(t.format)))award('whitewash',t,{opponentId:t.opponentId});
-    if(!ranked(t))continue;
     if(t.result==='W'){
       run++;if(run===5){award('untouchable',t,{opponentId:t.opponentId});run=0;}
       const r=(rivals.get(t.opponentId)||0)+1;
@@ -81,11 +58,11 @@ export function calculateAchievements({tickets=[],uid,groupId,members=[],now=new
   conqueror.details=conqueror.rosterIds.map(id=>({label:byId.get(id)?.displayName||'Former player',value:conqueror.defeatedIds.includes(id)?'Defeated':'Still to beat'}));
 
   const weeks=new Map(),currentWeek=periodKeys(new Date(current)).weekKey;
-  for(const t of all.filter(ranked)){const key=periodKeys(new Date(t.seasonAt)).weekKey;if(!weeks.has(key))weeks.set(key,[]);weeks.get(key).push(t);}
+  for(const t of all){const key=periodKeys(new Date(t.seasonAt)).weekKey;if(!weeks.has(key))weeks.set(key,[]);weeks.get(key).push(t);}
   const three=get('three-peat'),perfect=get('perfect-reign');let championshipRun=0,previous=null;
   const completed=[...weeks.keys()].filter(key=>key<currentWeek).sort();
   for(const key of completed){
-    const standing=weekResult(weeks.get(key),uid);
+    const standing=weekResult(weeks.get(key),uid,members,ledger,closeAt(key)-1);
     if(previous&&weekStamp(key)-weekStamp(previous)!==week)championshipRun=0;
     if(standing.champion===uid){
       championshipRun++;
@@ -97,7 +74,7 @@ export function calculateAchievements({tickets=[],uid,groupId,members=[],now=new
   // An empty or unplayed just-completed week also interrupts a championship run.
   if(!previous||weekStamp(currentWeek)-weekStamp(previous)!==week)championshipRun=0;
   three.progress=championshipRun;three.progressText=`${championshipRun}/3 completed championship weeks`;
-  const live=weekResult(weeks.get(currentWeek)||[],uid);
+  const live=weekResult(weeks.get(currentWeek)||[],uid,members,ledger,current);
   perfect.weekKey=currentWeek;
   perfect.conditions=[{label:'3 ranked wins',current:live.wins,target:3,met:live.wins>=3,value:`${Math.min(live.wins,3)}/3`},{label:'2 different opponents',current:live.opponents.size,target:2,met:live.opponents.size>=2,value:`${Math.min(live.opponents.size,2)}/2`},{label:'No losses',current:live.losses,target:0,met:live.losses===0&&live.wins+live.draws>0,value:String(live.losses)+' losses'},{label:'Sole weekly leader',current:live.rank,target:1,met:live.champion===uid,value:live.rank?'#'+live.rank:'No games yet'}];
   perfect.progress=perfect.conditions.filter(c=>c.met).length;perfect.progressText=live.losses?'Try again next week':`${Math.min(live.wins,3)}/3 wins · ${Math.min(live.opponents.size,2)}/2 opponents`;

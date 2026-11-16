@@ -33,7 +33,7 @@ On the email sign-in screen, **Forgot password?** sends a reset email using Fire
 
 ## Profile and achievements
 
-The Profile page shows matches won, matches played, and win rate for the active group, using all its verified results. Pending reports and cancelled matches do not count. Existing profile levels use 100 cosmetic XP each, with XP equal to twice the player’s agreed score. Cosmetic XP never determines competition rankings. A pending amendment keeps the existing verified score until both players accept the change.
+The Profile page shows matches won, matches played, and win rate for the active group, using all its verified results. Pending reports and cancelled matches do not count. Profiles now show one permanent OpenSkill-based club Skill Rating, starting at 1,000, instead of XP levels. Eligible ranked victories award 3/4/5 competition points according to pre-match win probability. Skill, Week and Month have separate leaderboard views; casual and excess repeated games remain historical stats only. See [the scoring policy and Spark architecture](docs/SCORING.md). A pending amendment keeps the existing verified score until both players accept the change.
 
 My stats shows recent form, best win streak, average score, losses, and draws. Achievements are derived from verified match milestones; they do not create extra XP or a separate currency. Account settings, group invitations, and the animated character picker remain accessible from the profile.
 
@@ -88,4 +88,8 @@ Manual acceptance: use two accounts in separate browsers; create a group, join u
 
 ## Phase 1 acceptance
 
-See [the completed technical acceptance report](docs/PHASE1_ACCEPTANCE.md). `npm run test:rules` includes a real three-player emulator workflow and the actual IndexedDB outbox. All matches are ranked with no weekly match limit, per the revised product decision. No account deletion, Firestore reset or points backfill is necessary: standings recalculate from verified match history. The four-week coworker pilot remains a real-world follow-up.
+See [the completed technical acceptance report](docs/PHASE1_ACCEPTANCE.md). `npm run test:rules` includes a real three-player emulator workflow and the actual IndexedDB outbox. The current pilot scoring policy, including casual matches and weekly pair limits, is documented in SCORING.md and supersedes the original Phase 1 scoring decision. No account deletion, Firestore reset or points backfill is necessary: standings recalculate from verified match history. The four-week coworker pilot remains a real-world follow-up.
+
+## Rating engine validation
+
+Run `npm run build:ratings` to rebuild the pinned browser bundle, `npm test` for unit checks, `npm run test:rules` for local Firebase authorization checks, and `npm run simulate:ratings` for the four-week pilot scenario. Deploy Hosting and Firestore rules together for the new ranked/casual ticket schema.

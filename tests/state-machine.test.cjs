@@ -1,6 +1,6 @@
 const test=require('node:test'),assert=require('node:assert/strict');
-let advance,periodKeys,scorePoints,validScore;
-test.before(async()=>{({advance,periodKeys,scorePoints,validScore}=await import('../public/domain.mjs'));});
+let advance,periodKeys,validScore;
+test.before(async()=>{({advance,periodKeys,validScore}=await import('../public/domain.mjs'));});
 const alice='alice',bob='bob';
 const now=new Date('2026-11-12T11:00:00.000Z');
 function ticket(){return {playerA:alice,playerB:bob,status:'open',revision:1,turn:bob,disputed:false,proposal:{score:{a:21,b:17},by:alice,note:'',at:now},finalScore:null,amendment:null,cancellation:null};}
@@ -80,5 +80,5 @@ test('invalid scores and nonplayers are rejected',()=>{
 test('weekly and monthly keys use India time and Monday',()=>{
  assert.deepEqual(periodKeys(new Date('2026-11-08T20:00:00Z')),{monthKey:'2026-11',weekKey:'2026-11-09'}); // Mon Nov 9 01:30 IST
  assert.deepEqual(periodKeys(new Date('2026-11-30T20:00:00Z')),{monthKey:'2026-12',weekKey:'2026-11-30'});
- assert.equal(scorePoints(21),42);
+
 });

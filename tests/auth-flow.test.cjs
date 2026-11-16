@@ -143,16 +143,16 @@ test('duplicate signup explains how to sign in and unknown auth errors retain th
 });
 test('leaderboards count only verified scores in the server creation-date season',async()=>{
   const f=await fixture(),now=new Date(),old=new Date(now.getTime()-40*86400000);
-  const base={playerA:'alice',playerB:'bob',createdAt:now,status:'finalized',finalScore:{a:21,b:17}};
+  const base={id:'a',playerA:'alice',playerB:'bob',createdAt:now,status:'finalized',finalScore:{a:21,b:17}};
   const data={members:[{id:'alice',displayName:'Alice'},{id:'bob',displayName:'Bob'}],tickets:[
-    base,{...base,finalScore:{a:9,b:10}},
-    {...base,status:'open',finalScore:null},
-    {...base,status:'cancelled',finalScore:{a:200,b:200}},
-    {...base,createdAt:old,weekKey:'forged',monthKey:'forged',finalScore:{a:200,b:200}}
+    base,{...base,id:'b',finalScore:{a:9,b:10}},
+    {...base,id:'c',status:'open',finalScore:null},
+    {...base,id:'d',status:'cancelled',finalScore:{a:200,b:200}},
+    {...base,id:'e',createdAt:old,weekKey:'forged',monthKey:'forged',finalScore:{a:200,b:200}}
   ]};
   for(const period of ['weekly','monthly']){
     const ranks=f.rankings(data,period);
-    assert.equal(ranks[0].id,'alice');assert.equal(ranks[0].score,3);assert.equal(ranks[1].score,3);assert.equal(ranks[0].rank,ranks[1].rank);
+    assert.equal(ranks[0].id,'bob');assert.equal(ranks[0].score,5);assert.equal(ranks[1].score,4);assert.equal(ranks[0].rank,1);assert.equal(ranks[1].rank,2);
     assert.equal(ranks[0].played,2);assert.equal(ranks[0].wins,1);assert.equal(ranks[1].wins,1);
   }
 });
