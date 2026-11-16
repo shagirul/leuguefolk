@@ -1,7 +1,7 @@
 /* ONE worker for app-shell caching AND FCM background notifications.
  * Register notificationclick BEFORE importing Firebase: its default handler can otherwise override yours.
  */
-const CACHE='agree-shell-v45';
+const CACHE='agree-shell-v46';
 const SDK_CACHE='agree-firebase-sdk-v1';
 const FIREBASE_SDK=['firebase-app.js','firebase-auth.js','firebase-firestore.js','firebase-messaging.js'].map(f=>`https://www.gstatic.com/firebasejs/12.19.0/${f}`);
 const AVATAR_ASSETS=['istj-anchor','estj-captain','isfj-guardian','esfj-connector','esfp-showstopper','isfp-freebird','estp-daredevil','istp-virtuoso','infj-oracle','enfj-catalyst','infp-dreamer','enfp-spark','intp-analyst','entp-maverick','intj-strategist','entj-conqueror'].map(id=>`/assets/characters/${id}.webp`);

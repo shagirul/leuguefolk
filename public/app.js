@@ -15,6 +15,12 @@ import {avatarFor,validAvatar,randomAvatar,playerAvatar,profileAvatar,avatarPick
 import {getMessaging,getToken,deleteToken,onMessage,isSupported} from 'https://www.gstatic.com/firebasejs/12.19.0/firebase-messaging.js';
 import {enqueue,forUser,patchAction,deleteAction} from '/queue.js';
 const root=document.getElementById('app');
+// Cancel browser menus/drag ghosts, but leave app-specific hold gestures bubbling.
+function preventChromeGesture(event){
+  if(!event.target.closest?.('input,textarea,[contenteditable]:not([contenteditable="false"])'))event.preventDefault();
+}
+document.addEventListener('contextmenu',preventChromeGesture);
+document.addEventListener('dragstart',preventChromeGesture);
 const scrollHeader=bindScrollHeader(root);
 const characterTooltip=createCharacterTooltipController(document,{setTimer:setTimeout,clearTimer:clearTimeout});
 const settings=self.AGREE_FIREBASE||{};

@@ -109,7 +109,9 @@ export function bindAvatarGestures(target,onSelect){
     else paintAvatarArc(picker,AVATARS.indexOf(avatarFor(picker.dataset.selected)));
   });
   target.addEventListener('pointercancel',event=>{if(drag?.pointerId===event.pointerId)clearDrag();});
-  target.addEventListener('lostpointercapture',event=>{if(drag?.pointerId===event.pointerId)clearDrag();});
+  // Touch initially captures the card. Transferring that capture to the stage
+  // emits a bubbling loss from the card; only losing the stage cancels our drag.
+  target.addEventListener('lostpointercapture',event=>{if(drag?.pointerId===event.pointerId&&event.target===drag.stage)clearDrag();});
   target.addEventListener('click',event=>{
     if(!suppressClick)return;
     const suppress=suppressClick;suppressClick=null;
